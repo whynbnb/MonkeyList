@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.70.1
-// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default) and can highlight the matched keyword inside the topic title. An advanced master switch can temporarily suspend every page effect without touching saved data.
+// @version      0.71.0
+// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories can each carry a per-user note that is marked with a small dot on the label and revealed on hover, override all other row/post effects, and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default) and can highlight the matched keyword inside the topic title. An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
 // @run-at       document-idle
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.70.1';
+  const SCRIPT_VERSION = '0.71.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -25,7 +25,6 @@
   const JUMP_CLASS = 'ld-tle-jump';
   const MARK_KEY = 'ld-tle-marks';
   const CATS_KEY = 'ld-tle-mark-cats';
-  const TAGS_KEY = 'ld-tle-mark-tags';
   const KEYWORDS_KEY = 'ld-tle-keyword-rules';
   const EFFECTS_KEY = 'ld-tle-topic-effects';
   const DEBUG_KEY = 'ld-tle-debug';
@@ -76,7 +75,6 @@
   let opUserId = null;
   let cachedTopicId = null;
   let cats = loadCats();
-  let tags = loadTags();
   let effects = loadEffects();
   let keywordRules = loadKeywordRules();
   let marks = loadMarks();
@@ -184,32 +182,6 @@
       const group = getCat(id);
       return group ? boundEffects(group.effectIds).map((effect) => ({ ...effect, priority: group.priority, source: group.label })) : [];
     });
-  }
-
-  function normalizeTag(raw) {
-    if (!raw || typeof raw !== 'object') return null;
-    const id = String(raw.id || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    const label = String(raw.label || '').trim();
-    const color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw.color || '') ? raw.color : '#8250df';
-    if (!id || !label) return null;
-    return { id, label, color };
-  }
-
-  function loadTags() {
-    try {
-      const raw = JSON.parse(localStorage.getItem(TAGS_KEY) || 'null');
-      return Array.isArray(raw) ? raw.map(normalizeTag).filter(Boolean) : [];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  function saveTags() {
-    localStorage.setItem(TAGS_KEY, JSON.stringify(tags));
-  }
-
-  function getTag(id) {
-    return tags.find((t) => t.id === id) || null;
   }
 
   function loadKeywordRules() {
@@ -451,16 +423,6 @@
     applyMarks();
   }
 
-  function normalizeTagIds(list) {
-    const seen = new Set();
-    const out = [];
-    (Array.isArray(list) ? list : []).forEach((id) => {
-      const t = getTag(id);
-      if (t && !seen.has(t.id)) { seen.add(t.id); out.push(t.id); }
-    });
-    return out;
-  }
-
   function loadMarks() {
     try {
       const raw = JSON.parse(localStorage.getItem(MARK_KEY) || '{}');
@@ -528,29 +490,6 @@
     saveMarks();
     applyMarks();
     fillCatSelects();
-  }
-
-  function normalizeTagReasons(reasons, tagIds) {
-    const allowed = new Set(normalizeTagIds(tagIds));
-    return Object.fromEntries(Object.entries(reasons && typeof reasons === 'object' ? reasons : {})
-      .filter(([id, reason]) => allowed.has(id) && String(reason).trim())
-      .map(([id, reason]) => [id, String(reason).trim()]));
-  }
-
-  function normalizeGroupTagIds(list) {
-    const seen = new Set();
-    return (Array.isArray(list) ? list : []).map(String).filter((id) => {
-      if (!getCat(id) || seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
-  }
-
-  function normalizeGroupTagReasons(reasons, groupIds) {
-    const allowed = new Set(normalizeGroupTagIds(groupIds));
-    return Object.fromEntries(Object.entries(reasons && typeof reasons === 'object' ? reasons : {})
-      .filter(([id, reason]) => allowed.has(id) && String(reason).trim())
-      .map(([id, reason]) => [id, String(reason).trim()]));
   }
 
   function normalizeMarkGroups(groups, availableCatIds) {
@@ -818,7 +757,10 @@
     groupIds.forEach((id) => {
       const group = getCat(id);
       const binding = mark.groups.find((item) => item.id === id) || { reason: '' };
-      if (group) wanted.push({ kind: 'group-tag', id: group.id, label: group.label, title: binding.reason || group.label, color: group.color || '#0969da' });
+      if (group) {
+        const reason = String(binding.reason || '').trim();
+        wanted.push({ kind: 'group-tag', id: group.id, label: group.label, title: reason || group.label, color: group.color || '#0969da', hasNote: !!reason });
+      }
     });
     [...host.children].forEach((el) => {
       if (el.classList.contains(MARK_BADGE) || el.classList.contains(MARK_ADD)) return;
@@ -838,6 +780,9 @@
       if (badge.className !== cls) badge.className = cls;
       if (badge.textContent !== item.label) badge.textContent = item.label;
       if (badge.title !== item.title) badge.title = item.title;
+      // A small dot marks labels that carry a note; the full note shows on hover.
+      if (item.hasNote) badge.dataset.ldTleNote = '1';
+      else delete badge.dataset.ldTleNote;
     });
     existing.filter((el) => !used.has(el)).forEach((el) => el.remove());
     if (username) attachMarkButton(host, username);
@@ -874,8 +819,6 @@
       <button type="button" data-act="save">保存</button>
       <button type="button" data-act="clear"${current ? '' : ' disabled'}>清除</button>
     `;
-    const tagBox = document.createElement('div');
-    tagBox.className = 'ld-tle-picker__tags';
     pickerEl.append(head, levels, note, actions);
     const currentGroups = current?.groups || [];
     cats.forEach((group) => {
@@ -904,11 +847,10 @@
 
   function exportMarks() {
     return JSON.stringify({
-      version: 8,
+      version: 9,
       exportedAt: new Date().toISOString(),
       effects,
       cats,
-      tags,
       keywordRules,
       marks,
     }, null, 2);
@@ -919,7 +861,6 @@
     if (!data || typeof data !== 'object') throw new Error('Invalid export');
     const importedEffects = Array.isArray(data.effects) ? data.effects.map(normalizeEffect).filter(Boolean) : [];
     const importedCats = Array.isArray(data.cats) ? data.cats.map(normalizeCat).filter(Boolean) : [];
-    const importedTags = Array.isArray(data.tags) ? data.tags.map(normalizeTag).filter(Boolean) : [];
     const importedEffectIds = new Set([...effects, ...importedEffects].map((effect) => effect.id));
     const importedRules = Array.isArray(data.keywordRules) ? data.keywordRules.filter((r) => r && r.keyword && Array.isArray(r.effectIds)).map((r) => ({
        id: String(r.id || `rule-${Date.now()}-${Math.random()}`),
@@ -957,10 +898,10 @@
         at: record.at || Date.now(),
       });
     }
-    return { parsed, importedEffects, importedCats, importedTags, importedRules };
+    return { parsed, importedEffects, importedCats, importedRules };
   }
 
-  function mergeImported(parsed, importedEffects, importedCats, importedTags, importedRules, mode) {
+  function mergeImported(parsed, importedEffects, importedCats, importedRules, mode) {
     let added = 0;
     let updated = 0;
     let skipped = 0;
@@ -979,9 +920,6 @@
     });
     importedCats.forEach((cat) => {
       if (!getCat(cat.id)) cats.push(cat);
-    });
-    importedTags.forEach((tag) => {
-      if (!getTag(tag.id)) tags.push(tag);
     });
     importedRules.forEach((rule) => {
       if (!keywordRules.some((r) => r.keyword.toLowerCase() === rule.keyword.toLowerCase())) keywordRules.push(rule);
@@ -1008,7 +946,6 @@
     saveCats();
     saveEffects();
     fillCatSelects();
-    saveTags();
     saveKeywordRules();
     saveMarks();
     updateMarkStyles();
@@ -1017,14 +954,12 @@
   }
 
   function resetAllData() {
-    [MARK_KEY, CATS_KEY, TAGS_KEY, KEYWORDS_KEY, EFFECTS_KEY, DEBUG_KEY].forEach((key) => localStorage.removeItem(key));
+    [MARK_KEY, CATS_KEY, KEYWORDS_KEY, EFFECTS_KEY, DEBUG_KEY].forEach((key) => localStorage.removeItem(key));
     cats = [];
-    tags = loadTags();
     effects = loadEffects();
     keywordRules = [];
     marks = loadMarks();
     saveCats();
-    saveTags();
     saveEffects();
     saveKeywordRules();
     saveMarks();
@@ -1034,7 +969,6 @@
       fillCatSelects();
       renderEffects();
       renderCats();
-      renderTags();
       renderKeywords();
       renderPanelList();
     }
@@ -1097,7 +1031,6 @@
     renderEffects();
     renderBuiltinRules();
     renderCats();
-    renderTags();
     renderPanelList();
   }
 
@@ -1133,7 +1066,6 @@
         <div class="ld-tle-panel__overview">
           <div class="ld-tle-panel__stat"><strong class="ld-tle-panel__stat-users">0</strong><span>已标记用户</span></div>
           <div class="ld-tle-panel__stat"><strong class="ld-tle-panel__stat-cats">0</strong><span>可复用效果</span></div>
-          <div class="ld-tle-panel__stat"><strong class="ld-tle-panel__stat-tags">0</strong><span>子标签</span></div>
         </div>
         <div class="ld-tle-panel__add ld-tle-panel__card">
           <input type="text" class="ld-tle-panel__user" placeholder="输入用户名">
@@ -1151,7 +1083,7 @@
         <div class="ld-tle-panel__builtin"></div>
       </section>
       <section class="ld-tle-panel__pane" data-pane="groups">
-        <div class="ld-tle-panel__section-head"><div><strong>分组</strong><span>分组只负责组织用户，可叠加多个效果</span></div></div>
+        <div class="ld-tle-panel__section-head"><div><strong>分组</strong><span>分组只负责组织用户，可叠加多个效果；每个用户的每个分组可单独写备注</span></div></div>
         <div class="ld-tle-panel__cats"></div>
         <div class="ld-tle-panel__cat-add ld-tle-panel__card">
           <input type="text" class="ld-tle-panel__cat-label" placeholder="新分组名">
@@ -1159,13 +1091,6 @@
           <input type="color" class="ld-tle-panel__cat-color" value="#0969da" title="分组颜色">
           <input type="number" class="ld-tle-panel__cat-priority" value="10000" title="分组优先级">
           <button type="button" data-act="add-cat">添加分组</button>
-        </div>
-        <div class="ld-tle-panel__section-head"><div><strong>子标签</strong><span>只显示在用户名旁，可多选</span></div></div>
-        <div class="ld-tle-panel__tags"></div>
-        <div class="ld-tle-panel__tag-add ld-tle-panel__card">
-          <input type="text" class="ld-tle-panel__tag-label" placeholder="新标签名">
-          <input type="color" class="ld-tle-panel__tag-color" value="#8250df" title="颜色">
-          <button type="button" data-act="add-tag">添加</button>
         </div>
       </section>
       <section class="ld-tle-panel__pane" data-pane="effects">
@@ -1187,7 +1112,7 @@
         </div>
       </section>
       <section class="ld-tle-panel__pane" data-pane="data">
-        <div class="ld-tle-panel__section-head"><div><strong>备份与迁移</strong><span>导出包含分类、子标签和用户标记</span></div></div>
+        <div class="ld-tle-panel__section-head"><div><strong>备份与迁移</strong><span>导出包含效果、分组、关键词和用户标记</span></div></div>
         <textarea class="ld-tle-panel__json" rows="10" placeholder="粘贴导出的 JSON 数据"></textarea>
         <div class="ld-tle-panel__btns">
           <button type="button" data-act="export">导出 JSON</button>
@@ -1271,14 +1196,6 @@
       panelEl.querySelector('.ld-tle-panel__cat-label').value = '';
       showPanelMsg(`已添加分类「${cat.label}」`);
     });
-    panelEl.querySelector('[data-act="add-tag"]').addEventListener('click', () => {
-      const label = (panelEl.querySelector('.ld-tle-panel__tag-label').value || '').trim();
-      const color = panelEl.querySelector('.ld-tle-panel__tag-color').value;
-      const tag = addTag(label, color);
-      if (!tag) { showPanelMsg('标签名无效或已存在'); return; }
-      panelEl.querySelector('.ld-tle-panel__tag-label').value = '';
-      showPanelMsg(`已添加标签「${tag.label}」`);
-    });
     panelEl.querySelector('[data-act="add-keyword"]').addEventListener('click', () => {
       const input = panelEl.querySelector('.ld-tle-panel__keyword');
       const keyword = input.value.trim();
@@ -1304,7 +1221,6 @@
     fillEffectSelects();
     renderCats();
     renderEffects();
-    renderTags();
     renderKeywords();
   }
 
@@ -1571,76 +1487,6 @@
     return id + '-' + n;
   }
 
-  function addTag(label, color) {
-    const name = String(label || '').trim();
-    if (!name) return null;
-    if (tags.some((t) => t.label === name)) return null;
-    const tag = normalizeTag({ id: uniqueId(name, (id) => !!getTag(id)), label: name, color });
-    if (!tag) return null;
-    tags.push(tag);
-    saveTags();
-    updateMarkStyles();
-    renderTags();
-    applyMarks();
-    return tag;
-  }
-
-  function updateTag(id, patch) {
-    const tag = getTag(id);
-    if (!tag) return;
-    if (patch.label != null) {
-      const label = String(patch.label).trim();
-      if (label) tag.label = label;
-    }
-    if (patch.color) tag.color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(patch.color) ? patch.color : tag.color;
-    saveTags();
-    updateMarkStyles();
-    renderTags();
-    applyMarks();
-  }
-
-  function removeTag(id) {
-    tags = tags.filter((t) => t.id !== id);
-    Object.keys(marks).forEach((user) => {
-      if (marks[user].tags) marks[user].tags = marks[user].tags.filter((t) => t !== id);
-    });
-    saveTags();
-    saveMarks();
-    updateMarkStyles();
-    renderTags();
-    applyMarks();
-    if (panelEl && panelEl.classList.contains('is-open')) renderPanelList();
-  }
-
-  function renderTags() {
-    if (!panelEl) return;
-    const box = panelEl.querySelector('.ld-tle-panel__tags');
-    if (!box) return;
-     box.innerHTML = '';
-    if (!tags.length) {
-      box.innerHTML = '<div class="ld-tle-panel__empty">暂无子标签</div>';
-      return;
-    }
-    tags.forEach((t) => {
-      const row = document.createElement('div');
-      row.className = 'ld-tle-panel__cat';
-      const color = document.createElement('input');
-      color.type = 'color';
-      color.value = /^#([0-9a-f]{6})$/i.test(t.color) ? t.color : '#8250df';
-      const label = document.createElement('input');
-      label.type = 'text';
-      label.value = t.label;
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.textContent = '删';
-      color.addEventListener('change', () => updateTag(t.id, { color: color.value }));
-      label.addEventListener('change', () => updateTag(t.id, { label: label.value }));
-      del.addEventListener('click', () => removeTag(t.id));
-      row.append(color, label, del);
-      box.append(row);
-    });
-  }
-
   function renderCats() {
     if (!panelEl) return;
     const box = panelEl.querySelector('.ld-tle-panel__cats');
@@ -1708,12 +1554,12 @@
   function runImport(mode) {
     const ta = panelEl.querySelector('.ld-tle-panel__json');
     try {
-      const { parsed, importedEffects, importedCats, importedTags, importedRules } = parseImport(ta.value);
-      if (!parsed.length && !importedEffects.length && !importedCats.length && !importedTags.length && !importedRules.length) {
+      const { parsed, importedEffects, importedCats, importedRules } = parseImport(ta.value);
+      if (!parsed.length && !importedEffects.length && !importedCats.length && !importedRules.length) {
         showPanelMsg('没有可导入的数据');
         return;
       }
-      const r = mergeImported(parsed, importedEffects, importedCats, importedTags, importedRules, mode);
+      const r = mergeImported(parsed, importedEffects, importedCats, importedRules, mode);
       renderPanelList();
       showPanelMsg(`新增 ${r.added}，更新 ${r.updated}，跳过 ${r.skipped}`);
     } catch (e) {
@@ -1735,7 +1581,6 @@
     list.scrollLeft = 0;
     panelEl.querySelector('.ld-tle-panel__stat-users').textContent = Object.keys(marks).length;
     panelEl.querySelector('.ld-tle-panel__stat-cats').textContent = effects.length;
-    panelEl.querySelector('.ld-tle-panel__stat-tags').textContent = tags.length;
     const entries = Object.entries(marks)
       .filter(([user, info]) => {
           if (filter && !(info.groups || []).some((group) => group.id === filter)) return false;
@@ -1770,11 +1615,13 @@
          tagButton.type = 'button';
          tagButton.className = 'ld-tle-panel__row-tag is-on ld-tle-panel__row-group-tag';
          tagButton.textContent = group.label;
-          tagButton.title = binding.reason || '点击编辑绑定原因';
-          tagButton.addEventListener('click', () => {
-            const reason = window.prompt(`编辑「${group.label}」的绑定原因`, binding.reason || '');
-           if (reason == null) return;
-           const nextGroups = selectedGroups.map((item) => item.id === group.id ? { ...item, reason } : item);
+         const reason = String(binding.reason || '').trim();
+         tagButton.title = reason || '点击编辑绑定原因';
+         if (reason) tagButton.dataset.ldTleNote = '1';
+         tagButton.addEventListener('click', () => {
+           const value = window.prompt(`编辑「${group.label}」的绑定原因`, binding.reason || '');
+           if (value == null) return;
+           const nextGroups = selectedGroups.map((item) => item.id === group.id ? { ...item, reason: value } : item);
              setMarkGroups(user, nextGroups, noteValue);
             renderPanelList();
           });
@@ -2443,6 +2290,19 @@
         box-sizing: border-box;
       }
       .${MARK_ROW} > .${MARK_BADGE} { margin: 0; }
+      /* A small dot marks a label that carries a note; the note shows on hover. */
+      [data-ld-tle-note="1"] { position: relative; }
+      [data-ld-tle-note="1"]::after {
+        content: '';
+        position: absolute;
+        top: -2px;
+        right: -2px;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 0 0 1px rgba(31, 35, 40, .35);
+      }
       #user-card .${MARK_ROW}, .user-card .${MARK_ROW}, .d-user-card .${MARK_ROW} {
         margin-top: 10px;
         gap: 8px;
@@ -2486,7 +2346,7 @@
         font: 13px/1.4 ui-sans-serif, system-ui, sans-serif;
       }
       .ld-tle-picker__head { font-weight: 700; margin-bottom: 8px; word-break: break-all; }
-      .ld-tle-picker__levels, .ld-tle-picker__tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+      .ld-tle-picker__levels { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
       .ld-tle-picker__levels {
         width: 100%;
         box-sizing: border-box;
@@ -2498,17 +2358,6 @@
         font: inherit;
       }
       .ld-tle-picker__sub { width: 100%; font-size: 11px; color: #57606a; }
-      .ld-tle-picker__tag {
-        padding: 2px 8px;
-        border: 1px dashed #d0d7de;
-        border-radius: 999px;
-        background: #fff;
-        cursor: pointer;
-        font: 600 11px/18px ui-sans-serif, system-ui, sans-serif;
-      }
-      .ld-tle-picker__tag.is-on { color: #fff; }
-      .ld-tle-picker__tag-reasons { display: flex; flex-direction: column; gap: 5px; margin: 0 0 8px; }
-      .ld-tle-picker__tag-reasons input { width: 100%; box-sizing: border-box; padding: 5px 7px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: inherit; font: inherit; }
       .ld-tle-picker__lv {
         padding: 2px 8px;
         border: 1px solid #d0d7de;
@@ -2578,20 +2427,20 @@
       .ld-tle-panel__nav button { flex: 1; padding: 8px 6px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #57606a; font-weight: 600; cursor: pointer; }
       .ld-tle-panel__nav button.is-active { border-color: #0969da; color: #0969da; }
       .ld-tle-panel__count { display: inline-flex; min-width: 20px; justify-content: center; margin-left: 4px; padding: 1px 5px; border-radius: 999px; background: #eef2f6; color: #57606a; font-size: 11px; }
-      .ld-tle-panel__overview { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+      .ld-tle-panel__overview { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; }
       .ld-tle-panel__stat { padding: 10px 12px; border: 1px solid #e1e6eb; border-radius: 9px; background: #f8fafc; }
       .ld-tle-panel__stat strong { display: block; color: #24292f; font-size: 19px; line-height: 1.1; }
       .ld-tle-panel__stat span { display: block; margin-top: 4px; color: #8b949e; font-size: 11px; }
       .ld-tle-panel__pane { display: none; padding-top: 14px; }
       .ld-tle-panel__pane.is-active { display: block; }
-      .ld-tle-panel__tools, .ld-tle-panel__btns, .ld-tle-panel__add, .ld-tle-panel__cat-add, .ld-tle-panel__tag-add { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+      .ld-tle-panel__tools, .ld-tle-panel__btns, .ld-tle-panel__add, .ld-tle-panel__cat-add { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
       .ld-tle-panel__card { padding: 12px; border: 1px solid #e1e6eb; border-radius: 9px; background: #f8fafc; box-shadow: 0 1px 2px rgba(31,35,40,.04); }
       .ld-tle-panel__section-head { display: flex; align-items: center; justify-content: space-between; margin: 6px 0 8px; }
       .ld-tle-panel__section-head strong { display: block; font-size: 13px; }
       .ld-tle-panel__section-head span { display: block; margin-top: 2px; color: #8b949e; font-size: 11px; }
-      .ld-tle-panel__add .ld-tle-panel__user, .ld-tle-panel__cat-add .ld-tle-panel__cat-label, .ld-tle-panel__tag-add .ld-tle-panel__tag-label { flex: 1 1 140px; padding: 7px 10px; }
+      .ld-tle-panel__add .ld-tle-panel__user, .ld-tle-panel__cat-add .ld-tle-panel__cat-label { flex: 1 1 140px; padding: 7px 10px; }
       .ld-tle-panel__sec { padding: 9px 10px 7px; margin: 14px 0 8px; border-bottom: 1px solid #eaeef2; color: #24292f; font-size: 12px; font-weight: 700; }
-      .ld-tle-panel__cats, .ld-tle-panel__tags { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid #eaeef2; border-radius: 9px; background: #fff; }
+      .ld-tle-panel__cats { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid #eaeef2; border-radius: 9px; background: #fff; }
       .ld-tle-panel__effects, .ld-tle-panel__builtin { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid #eaeef2; border-radius: 9px; background: #fff; }
       .ld-tle-panel__effect-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) 82px minmax(0, 1.5fr); gap: 7px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f4; }
       .ld-tle-panel__effect-row:last-child { border-bottom: 0; }
@@ -2613,7 +2462,6 @@
         .ld-tle-panel__cat > .ld-tle-panel__cat-delete { grid-column: 7; grid-row: 1; }
        .ld-tle-panel__cat > .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; width: 100%; }
       .ld-tle-panel__cat input[type="number"], .ld-tle-panel__builtin-row input[type="number"], .ld-tle-panel__keyword-row input[type="number"] { width: 68px; box-sizing: border-box; padding: 5px 6px; }
-      .ld-tle-panel__tags .ld-tle-panel__cat { grid-template-columns: 32px 1fr auto; }
       .ld-tle-panel__cat input[type="number"] { width: 56px; padding: 5px 6px; }
       .ld-tle-panel__cat input[type="color"] { width: 32px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
       .ld-tle-panel__effect-row input[type="color"] { width: 30px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
@@ -2630,8 +2478,8 @@
       .ld-tle-panel__cat-add { align-items: center; }
       .ld-tle-panel__cat-add .ld-tle-panel__effect-choices { flex: 2 1 220px; }
       .ld-tle-panel__cat-add .ld-tle-panel__cat-color { width: 32px; height: 30px; padding: 0; }
-      .ld-tle-panel__add button, .ld-tle-panel__cat-add button, .ld-tle-panel__tag-add button { padding: 7px 12px; border: 0 !important; border-radius: 6px !important; background: #0969da !important; color: #fff !important; font-weight: 700; cursor: pointer; }
-      .ld-tle-panel__add button:hover, .ld-tle-panel__cat-add button:hover, .ld-tle-panel__tag-add button:hover { background: #0757b8 !important; }
+      .ld-tle-panel__add button, .ld-tle-panel__cat-add button { padding: 7px 12px; border: 0 !important; border-radius: 6px !important; background: #0969da !important; color: #fff !important; font-weight: 700; cursor: pointer; }
+      .ld-tle-panel__add button:hover, .ld-tle-panel__cat-add button:hover { background: #0757b8 !important; }
       .ld-tle-panel input:focus, .ld-tle-panel select:focus, .ld-tle-panel textarea:focus { outline: 2px solid rgba(9,105,218,.25); border-color: #0969da; }
        .ld-tle-panel__list { max-height: 390px; min-width: 0; overflow-x: hidden; overflow-y: auto; margin: 10px 0 12px; padding: 2px 4px; border-top: 1px solid #eaeef2; }
        .ld-tle-panel__row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) 38px; gap: 7px; align-items: center; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; padding: 9px 5px; border-bottom: 1px solid #f0f2f4; }
@@ -2725,7 +2573,7 @@
         .ld-tle-panel__nav button { color: #8b949e; }
         .ld-tle-panel__nav button.is-active { color: #58a6ff; border-color: #58a6ff; }
         .ld-tle-panel__card { border-color: #30363d; background: #0d1117; }
-         .ld-tle-panel__stat, .ld-tle-panel__cats, .ld-tle-panel__tags, .ld-tle-panel__effects, .ld-tle-panel__builtin { border-color: #30363d; background: #0d1117; }
+         .ld-tle-panel__stat, .ld-tle-panel__cats, .ld-tle-panel__effects, .ld-tle-panel__builtin { border-color: #30363d; background: #0d1117; }
         .ld-tle-panel__stat strong { color: #f0f6fc; }
         .ld-tle-panel__section-head span, .ld-tle-panel__subtitle { color: #8b949e; }
         .ld-tle-panel__list { border-color: #30363d; }
@@ -2814,13 +2662,6 @@
     }).concat(cats.map((group) => {
       const color = group.color || '#0969da';
       return `.${MARK_BADGE}--group-tag-${group.id} { color: ${contrastColor(color)}; background: ${color}; }`;
-    })).concat(tags.map((t) => {
-      const fg = contrastColor(t.color);
-      return `
-         .${MARK_BADGE}--effect-tag-${t.id} { color: ${fg}; background: ${t.color}; }
-         .${MARK_BADGE}--tag-${t.id} { color: ${fg}; background: ${t.color}; }
-        .ld-tle-picker__tag--${t.id}.is-on { color: ${fg}; background: ${t.color}; border-color: ${t.color}; }
-       `;
     })).join('\n');
   }
 
