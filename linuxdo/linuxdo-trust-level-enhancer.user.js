@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.71.0
+// @version      0.71.1
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories can each carry a per-user note that is marked with a small dot on the label and revealed on hover, override all other row/post effects, and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default) and can highlight the matched keyword inside the topic title. An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.71.0';
+  const SCRIPT_VERSION = '0.71.1';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -1588,7 +1588,7 @@
         return user.includes(q) || (info.note || '').toLowerCase().includes(q);
       })
       .sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
-    panelEl.querySelector('.ld-tle-panel__count').textContent = `${entries.length} / ${Object.keys(marks).length}`;
+    panelEl.querySelector('.ld-tle-panel__count').textContent = `${entries.length}/${Object.keys(marks).length}`;
     list.innerHTML = '';
     if (!entries.length) {
       list.innerHTML = '<div class="ld-tle-panel__empty">暂无标记</div>';
@@ -1600,7 +1600,7 @@
       row.innerHTML = `
         <a href="/u/${encodeURIComponent(user)}" target="_blank" rel="noopener">@${user}</a>
         <div class="ld-tle-panel__row-tags"></div>
-        <button type="button" data-act="del">删</button>
+        <button type="button" class="ld-tle-panel__row-del" data-act="del">删</button>
       `;
        const tagBox = row.querySelector('.ld-tle-panel__row-tags');
        const noteValue = info.note || '';
@@ -2400,6 +2400,9 @@
         box-shadow: 0 4px 16px rgba(0,0,0,.2);
       }
       .ld-tle-panel {
+        /* Shared geometry tokens keep every control the same height / radius. */
+        --ld-tle-ctl-h: 32px;
+        --ld-tle-radius: 8px;
         display: none;
         position: fixed;
         right: 18px;
@@ -2412,36 +2415,57 @@
         box-sizing: border-box;
         padding: 18px;
         border: 1px solid #d8dee4;
-        border-radius: 14px;
+        border-radius: 12px;
         background: #fff;
         color: #24292f;
         box-shadow: 0 16px 48px rgba(31,35,40,.2);
         font: 13px/1.4 ui-sans-serif, system-ui, sans-serif;
       }
+      /* One consistent control height across the whole panel. */
+      .ld-tle-panel input:not([type="color"]):not([type="checkbox"]):not([type="radio"]),
+      .ld-tle-panel select,
+      .ld-tle-panel__bar button,
+      .ld-tle-panel__add button,
+      .ld-tle-panel__cat-add button,
+      .ld-tle-panel__btns button,
+      .ld-tle-panel__cat button,
+      .ld-tle-panel__keyword-row button,
+      .ld-tle-panel__row-del {
+        height: var(--ld-tle-ctl-h);
+        box-sizing: border-box;
+      }
+      .ld-tle-panel input:not([type="color"]):not([type="checkbox"]):not([type="radio"]),
+      .ld-tle-panel select {
+        padding: 0 10px;
+        line-height: calc(var(--ld-tle-ctl-h) - 2px);
+      }
+      .ld-tle-panel button { transition: background .12s ease, border-color .12s ease, color .12s ease; }
       .ld-tle-panel.is-open { display: block; }
       .ld-tle-panel__bar { position: sticky; top: -18px; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 14px 0 13px; margin-bottom: 0; border-bottom: 1px solid #eaeef2; background: #fff; }
       .ld-tle-panel__bar strong { display: block; font-size: 16px; letter-spacing: -.01em; }
       .ld-tle-panel__subtitle { display: block; margin-top: 2px; color: #8b949e; font-size: 11px; }
-      .ld-tle-panel__bar button { padding: 5px 10px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: #57606a; cursor: pointer; }
-      .ld-tle-panel__nav { display: flex; gap: 3px; padding: 10px 0 2px; border-bottom: 1px solid #eaeef2; }
-      .ld-tle-panel__nav button { flex: 1; padding: 8px 6px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #57606a; font-weight: 600; cursor: pointer; }
-      .ld-tle-panel__nav button.is-active { border-color: #0969da; color: #0969da; }
-      .ld-tle-panel__count { display: inline-flex; min-width: 20px; justify-content: center; margin-left: 4px; padding: 1px 5px; border-radius: 999px; background: #eef2f6; color: #57606a; font-size: 11px; }
+      .ld-tle-panel__bar button { padding: 0 12px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: #57606a; cursor: pointer; }
+      .ld-tle-panel__bar button:hover { background: #f6f8fa; }
+      .ld-tle-panel__nav { display: flex; gap: 2px; padding: 10px 0 2px; border-bottom: 1px solid #eaeef2; }
+      .ld-tle-panel .ld-tle-panel__nav button { display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; gap: 3px; padding: 8px 3px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #57606a; font-weight: 600; font-size: 12px; line-height: 1.2; white-space: nowrap; cursor: pointer; }
+      .ld-tle-panel .ld-tle-panel__nav button.is-active { border-color: #0969da; color: #0969da; }
+      .ld-tle-panel .ld-tle-panel__nav button:not(.is-active):hover { color: #24292f; }
+      .ld-tle-panel__count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 16px; padding: 0 4px; border-radius: 999px; background: #eef2f6; color: #57606a; font-size: 10px; font-weight: 600; }
       .ld-tle-panel__overview { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; }
-      .ld-tle-panel__stat { padding: 10px 12px; border: 1px solid #e1e6eb; border-radius: 9px; background: #f8fafc; }
+      .ld-tle-panel__stat { padding: 10px 12px; border: 1px solid #e1e6eb; border-radius: var(--ld-tle-radius); background: #f8fafc; }
       .ld-tle-panel__stat strong { display: block; color: #24292f; font-size: 19px; line-height: 1.1; }
       .ld-tle-panel__stat span { display: block; margin-top: 4px; color: #8b949e; font-size: 11px; }
       .ld-tle-panel__pane { display: none; padding-top: 14px; }
       .ld-tle-panel__pane.is-active { display: block; }
       .ld-tle-panel__tools, .ld-tle-panel__btns, .ld-tle-panel__add, .ld-tle-panel__cat-add { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
-      .ld-tle-panel__card { padding: 12px; border: 1px solid #e1e6eb; border-radius: 9px; background: #f8fafc; box-shadow: 0 1px 2px rgba(31,35,40,.04); }
+      .ld-tle-panel__card { padding: 12px; border: 1px solid #e1e6eb; border-radius: var(--ld-tle-radius); background: #f8fafc; box-shadow: 0 1px 2px rgba(31,35,40,.04); }
       .ld-tle-panel__section-head { display: flex; align-items: center; justify-content: space-between; margin: 6px 0 8px; }
       .ld-tle-panel__section-head strong { display: block; font-size: 13px; }
       .ld-tle-panel__section-head span { display: block; margin-top: 2px; color: #8b949e; font-size: 11px; }
-      .ld-tle-panel__add .ld-tle-panel__user, .ld-tle-panel__cat-add .ld-tle-panel__cat-label { flex: 1 1 140px; padding: 7px 10px; }
+      .ld-tle-panel__add .ld-tle-panel__user, .ld-tle-panel__cat-add .ld-tle-panel__cat-label { flex: 1 1 140px; padding: 0 10px; }
       .ld-tle-panel__sec { padding: 9px 10px 7px; margin: 14px 0 8px; border-bottom: 1px solid #eaeef2; color: #24292f; font-size: 12px; font-weight: 700; }
-      .ld-tle-panel__cats { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid #eaeef2; border-radius: 9px; background: #fff; }
-      .ld-tle-panel__effects, .ld-tle-panel__builtin { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid #eaeef2; border-radius: 9px; background: #fff; }
+      .ld-tle-panel__cats { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid #eaeef2; border-radius: var(--ld-tle-radius); background: #fff; }
+      .ld-tle-panel__effects, .ld-tle-panel__builtin { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid #eaeef2; border-radius: var(--ld-tle-radius); background: #fff; }
       .ld-tle-panel__effect-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) 82px minmax(0, 1.5fr); gap: 7px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f4; }
       .ld-tle-panel__effect-row:last-child { border-bottom: 0; }
       .ld-tle-panel__effect-swatch { width: 24px; height: 24px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
@@ -2449,7 +2473,7 @@
       .ld-tle-panel__builtin-row { display: grid; grid-template-columns: 28px minmax(100px, 1fr) minmax(100px, 1.5fr) 68px; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f4; }
       .ld-tle-panel__builtin-row:last-child { border-bottom: 0; }
       .ld-tle-panel__effect-choices { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
-      .ld-tle-panel__effect-choices label { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid #d0d7de; border-radius: 6px; background: #f8fafc; cursor: pointer; }
+      .ld-tle-panel__effect-choices label { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; box-sizing: border-box; padding: 0 8px; border: 1px solid #d0d7de; border-radius: 6px; background: #f8fafc; cursor: pointer; }
       .ld-tle-panel__effect-choices label:has(input:checked) { border-color: #0969da; background: #eaf3ff; color: #0969da; }
       .ld-tle-panel__cat-effect, .ld-tle-panel__keyword-cat { min-height: 34px; }
         .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 30px 30px 30px 38px; grid-template-rows: auto auto; gap: 7px; align-items: center; padding: 7px 0; }
@@ -2461,8 +2485,8 @@
         .ld-tle-panel__cat > .ld-tle-panel__cat-copy { grid-column: 6; grid-row: 1; }
         .ld-tle-panel__cat > .ld-tle-panel__cat-delete { grid-column: 7; grid-row: 1; }
        .ld-tle-panel__cat > .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; width: 100%; }
-      .ld-tle-panel__cat input[type="number"], .ld-tle-panel__builtin-row input[type="number"], .ld-tle-panel__keyword-row input[type="number"] { width: 68px; box-sizing: border-box; padding: 5px 6px; }
-      .ld-tle-panel__cat input[type="number"] { width: 56px; padding: 5px 6px; }
+      .ld-tle-panel__cat input[type="number"], .ld-tle-panel__builtin-row input[type="number"], .ld-tle-panel__keyword-row input[type="number"] { width: 68px; box-sizing: border-box; }
+      .ld-tle-panel__cat input[type="number"] { width: 56px; }
       .ld-tle-panel__cat input[type="color"] { width: 32px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
       .ld-tle-panel__effect-row input[type="color"] { width: 30px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
       .ld-tle-panel__q, .ld-tle-panel__filter, .ld-tle-panel__json, .ld-tle-panel button, .ld-tle-panel select, .ld-tle-panel input {
@@ -2472,20 +2496,21 @@
         background: #fff;
         color: inherit;
       }
-      .ld-tle-panel__q { flex: 1; padding: 7px 10px; }
-      .ld-tle-panel__tools select { min-width: 112px; padding: 7px 8px; }
-      .ld-tle-panel__add select { min-width: 82px; padding: 7px 8px; }
+      .ld-tle-panel__q { flex: 1; }
+      .ld-tle-panel__tools select { min-width: 112px; }
+      .ld-tle-panel__add select { min-width: 82px; }
       .ld-tle-panel__cat-add { align-items: center; }
       .ld-tle-panel__cat-add .ld-tle-panel__effect-choices { flex: 2 1 220px; }
       .ld-tle-panel__cat-add .ld-tle-panel__cat-color { width: 32px; height: 30px; padding: 0; }
-      .ld-tle-panel__add button, .ld-tle-panel__cat-add button { padding: 7px 12px; border: 0 !important; border-radius: 6px !important; background: #0969da !important; color: #fff !important; font-weight: 700; cursor: pointer; }
+      .ld-tle-panel__add button, .ld-tle-panel__cat-add button { padding: 0 12px; border: 0 !important; border-radius: 6px !important; background: #0969da !important; color: #fff !important; font-weight: 700; cursor: pointer; }
       .ld-tle-panel__add button:hover, .ld-tle-panel__cat-add button:hover { background: #0757b8 !important; }
       .ld-tle-panel input:focus, .ld-tle-panel select:focus, .ld-tle-panel textarea:focus { outline: 2px solid rgba(9,105,218,.25); border-color: #0969da; }
        .ld-tle-panel__list { max-height: 390px; min-width: 0; overflow-x: hidden; overflow-y: auto; margin: 10px 0 12px; padding: 2px 4px; border-top: 1px solid #eaeef2; }
-       .ld-tle-panel__row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) 38px; gap: 7px; align-items: center; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; padding: 9px 5px; border-bottom: 1px solid #f0f2f4; }
-      .ld-tle-panel__row:hover { border-radius: 6px; background: #f8fafc; }
+       .ld-tle-panel__row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) 40px; gap: 8px; align-items: center; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; padding: 8px 6px; border-bottom: 1px solid #f0f2f4; }
+      .ld-tle-panel__row:hover { border-radius: var(--ld-tle-radius); background: #f8fafc; }
       .ld-tle-panel__row a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-       .ld-tle-panel__row > select { width: 100%; min-width: 0; box-sizing: border-box; }
+       .ld-tle-panel__row .ld-tle-panel__row-del { width: 100%; padding: 0; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: #57606a; cursor: pointer; }
+       .ld-tle-panel__row .ld-tle-panel__row-del:hover { background: #ffebe9; border-color: #cf222e; color: #cf222e; }
         .ld-tle-panel__row-tags { display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; gap: 5px; width: 100%; max-width: 100%; min-width: 0; overflow: visible; box-sizing: border-box; }
        .ld-tle-panel__row-tags-label, .ld-tle-panel__row-tags-empty { color: #8b949e; font-size: 11px; }
        .ld-tle-panel__row-tags-label { margin-right: 2px; }
@@ -2498,7 +2523,7 @@
        .ld-tle-panel__row-group-remove:hover { background: #ffebe9; border-color: #cf222e; color: #cf222e; }
        .ld-tle-panel__row-tag-picker-break { flex-basis: 100%; width: 0; height: 0; }
        .ld-tle-panel__row-tag-add { border-style: dashed; color: #0969da; }
-        .ld-tle-panel__row-tag-picker { width: min(240px, 100%); max-width: 100%; min-width: 0; padding: 3px 5px; box-sizing: border-box; }
+        .ld-tle-panel__row-tag-picker { width: 100%; max-width: 100%; min-width: 0; }
         .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) 34px 32px 68px 28px 30px 30px 30px 38px; grid-template-rows: auto auto; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
         .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-word { grid-column: 1; grid-row: 1; min-width: 0; }
         .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-ignorecase { grid-column: 2; grid-row: 1; }
@@ -2515,13 +2540,14 @@
       .ld-tle-panel__keywords { margin-bottom: 10px; border-top: 1px solid #eaeef2; }
       .ld-tle-panel__json { width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 10px; border-radius: 8px !important; line-height: 1.5; resize: vertical; }
       .ld-tle-panel__btns { padding-top: 8px; border-top: 1px solid #eaeef2; }
-       .ld-tle-panel__btns button, .ld-tle-panel__row button { padding: 6px 9px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: #57606a; cursor: pointer; }
+       .ld-tle-panel__btns button, .ld-tle-panel__row button { padding: 0 10px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: #57606a; cursor: pointer; }
        .ld-tle-panel__btns button:first-child { border-color: #0969da; color: #0969da; font-weight: 700; }
         .ld-tle-panel__btns button:hover, .ld-tle-panel__row button:hover { background: #f6f8fa; }
         .ld-tle-panel__btns button.ld-tle-panel__danger { border-color: #cf222e; color: #cf222e; font-weight: 700; }
         .ld-tle-panel__btns button.ld-tle-panel__danger:hover { background: #ffebe9; }
         .ld-tle-panel__debug-toggle { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 12px; color: #57606a; cursor: pointer; }
        .ld-tle-panel__row .ld-tle-panel__row-group-tag { padding: 3px 9px; border: 1px solid #8250df; border-radius: 6px 0 0 6px; background: #f3efff; color: #6639b5; font: 600 12px/18px ui-sans-serif, system-ui, sans-serif; }
+       .ld-tle-panel__row .ld-tle-panel__row-group-tag[data-ld-tle-note="1"]::after { left: -2px; right: auto; }
        .ld-tle-panel__row .ld-tle-panel__row-group-remove { padding: 0 !important; border: 1px solid #d0d7de; border-left: 0; border-radius: 0 6px 6px 0; background: #f6f8fa; color: #8b949e; }
       .ld-tle-panel__msg { min-height: 1.2em; color: #57606a; font-size: 12px; }
       .ld-tle-panel__empty { color: #8b949e; padding: 12px 0; text-align: center; }
@@ -2531,7 +2557,7 @@
         .ld-tle-panel__bar { top: -12px; }
         .ld-tle-panel__overview { gap: 5px; }
         .ld-tle-panel__stat { padding: 8px; }
-          .ld-tle-panel__row { grid-template-columns: minmax(0, 1fr) 38px; gap: 5px; }
+          .ld-tle-panel__row { grid-template-columns: minmax(0, 1fr) 40px; gap: 6px; }
           .ld-tle-panel__row > a { grid-column: 1; min-width: 0; }
           .ld-tle-panel__row > [data-act="del"] { grid-column: 2; grid-row: 1; }
           .ld-tle-panel__row-tags { grid-column: 1 / -1; width: 100%; }
@@ -2564,14 +2590,19 @@
         .${MARK_ADD}:hover { background: #21262d; }
         .ld-tle-picker, .ld-tle-panel { background: #161b22; border-color: #30363d; color: #c9d1d9; }
         .ld-tle-picker__levels, .ld-tle-picker__lv, .ld-tle-picker__note, .ld-tle-picker__actions button,
-        .ld-tle-panel__q, .ld-tle-panel__filter, .ld-tle-panel__json, .ld-tle-panel button, .ld-tle-panel select, .ld-tle-panel input {
+        .ld-tle-panel__q, .ld-tle-panel__filter, .ld-tle-panel__json,
+        .ld-tle-panel__bar button, .ld-tle-panel__btns button,
+        .ld-tle-panel__cat button, .ld-tle-panel__keyword-row button,
+        .ld-tle-panel select,
+        .ld-tle-panel input:not([type="color"]):not([type="checkbox"]):not([type="radio"]) {
           background: #0d1117; border-color: #30363d; color: #c9d1d9;
         }
         .ld-tle-fab { background: #c9d1d9; color: #0d1117; }
         .ld-tle-panel__bar { background: #161b22; border-color: #30363d; }
         .ld-tle-panel__nav { border-color: #30363d; }
-        .ld-tle-panel__nav button { color: #8b949e; }
-        .ld-tle-panel__nav button.is-active { color: #58a6ff; border-color: #58a6ff; }
+        .ld-tle-panel .ld-tle-panel__nav button { color: #8b949e; }
+        .ld-tle-panel .ld-tle-panel__nav button:not(.is-active):hover { color: #f0f6fc; }
+        .ld-tle-panel .ld-tle-panel__nav button.is-active { color: #58a6ff; border-color: #58a6ff; }
         .ld-tle-panel__card { border-color: #30363d; background: #0d1117; }
          .ld-tle-panel__stat, .ld-tle-panel__cats, .ld-tle-panel__effects, .ld-tle-panel__builtin { border-color: #30363d; background: #0d1117; }
         .ld-tle-panel__stat strong { color: #f0f6fc; }
@@ -2580,7 +2611,12 @@
         .ld-tle-panel__row { border-color: #30363d; }
         .ld-tle-panel__row:hover { background: #21262d; }
         .ld-tle-panel__keywords, .ld-tle-panel__keyword-row { border-color: #30363d; }
-        .ld-tle-panel__bar button, .ld-tle-panel__btns button, .ld-tle-panel__row button { background: #0d1117; border-color: #30363d; color: #c9d1d9; }
+        .ld-tle-panel__bar button, .ld-tle-panel__btns button { background: #0d1117; border-color: #30363d; color: #c9d1d9; }
+        .ld-tle-panel__count { background: #21262d; color: #c9d1d9; }
+        .ld-tle-panel__row .ld-tle-panel__row-del { background: #0d1117; border-color: #30363d; color: #c9d1d9; }
+        .ld-tle-panel__row .ld-tle-panel__row-del:hover { background: #2d1b1b; border-color: #f85149; color: #f85149; }
+        .ld-tle-panel__row .ld-tle-panel__row-group-tag { background: #1f1633; border-color: #8957e5; color: #c4b5fd; }
+        .ld-tle-panel__row .ld-tle-panel__row-group-remove { background: #161b22; border-color: #30363d; color: #8b949e; }
         .ld-tle-panel__sec, .ld-tle-panel__btns { border-color: #30363d; }
       }
 
