@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.68.2
-// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel. An advanced master switch can temporarily suspend every page effect without touching saved data.
+// @version      0.69.0
+// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default). An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
 // @run-at       document-idle
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.68.2';
+  const SCRIPT_VERSION = '0.69.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -214,6 +214,7 @@
         effectIds: libraryEffectIds(r.effectIds).filter((id) => getEffect(id)),
         color: /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(r.color || '') ? r.color : '#0969da',
         priority: Number.isFinite(Number(r.priority)) ? Number(r.priority) : 5000,
+        ignoreCase: r.ignoreCase !== false,
         enabled: r.enabled !== false,
       })) : [];
     } catch (e) {
@@ -231,17 +232,26 @@
     const categoryElements = [...row.querySelectorAll('.badge-category')];
     const tagsText = tagElements.map((el) => el.textContent).join(' ');
     const categoriesText = categoryElements.map((el) => el.textContent).join(' ');
-    const haystack = `${title} ${tagsText} ${categoriesText}`.toLowerCase();
+    const rawHaystack = `${title} ${tagsText} ${categoriesText}`;
+    const lowerHaystack = rawHaystack.toLowerCase();
+    const lowerTitle = title.toLowerCase();
     const matchableElements = [...tagElements, ...categoryElements];
     const matches = [];
     keywordRules.forEach((r) => {
-      if (!r.enabled || !r.keyword || !haystack.includes(r.keyword.toLowerCase()) || !boundEffects(r.effectIds).length) return;
-      const keyword = r.keyword.toLowerCase();
+      // ignoreCase is on by default; turn it off to require an exact case match.
+      const ignoreCase = r.ignoreCase !== false;
+      const haystack = ignoreCase ? lowerHaystack : rawHaystack;
+      const keyword = ignoreCase ? r.keyword.toLowerCase() : r.keyword;
+      if (!r.enabled || !r.keyword || !haystack.includes(keyword) || !boundEffects(r.effectIds).length) return;
+      const titleMatch = (ignoreCase ? lowerTitle : title).includes(keyword);
       matches.push({
         rule: r,
         effects: boundEffects(r.effectIds, r.color),
-        titleMatch: title.toLowerCase().includes(keyword),
-        matchingTags: matchableElements.filter((el) => el.textContent.toLowerCase().includes(keyword)),
+        titleMatch,
+        matchingTags: matchableElements.filter((el) => {
+          const text = el.textContent || '';
+          return (ignoreCase ? text.toLowerCase() : text).includes(keyword);
+        }),
       });
     });
     return matches.length ? { matches } : null;
@@ -324,6 +334,7 @@
       effectIds: [...(src.effectIds || [])],
       color: src.color,
       priority: src.priority,
+      ignoreCase: src.ignoreCase !== false,
       enabled: src.enabled,
     });
     saveKeywordRules();
@@ -806,6 +817,7 @@
        effectIds: libraryEffectIds(r.effectIds).filter((id) => importedEffectIds.has(id)),
        color: /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(r.color || '') ? r.color : '#0969da',
        priority: Number.isFinite(Number(r.priority)) ? Number(r.priority) : 5000,
+       ignoreCase: r.ignoreCase !== false,
        enabled: r.enabled !== false,
      })) : [];
     let source = data;
@@ -1043,13 +1055,16 @@
         <div class="ld-tle-panel__effects"></div>
       </section>
       <section class="ld-tle-panel__pane" data-pane="keywords">
-        <div class="ld-tle-panel__section-head"><div><strong>关键词规则</strong><span>命中话题标题或主题标签后应用指定效果</span></div></div>
+        <div class="ld-tle-panel__section-head"><div><strong>关键词规则</strong><span>命中话题标题或主题标签后应用指定效果 · 可切换是否忽略大小写</span></div></div>
         <div class="ld-tle-panel__keywords"></div>
         <div class="ld-tle-panel__keyword-add ld-tle-panel__card">
           <input type="text" class="ld-tle-panel__keyword" placeholder="关键词，例如：抽奖">
           <div class="ld-tle-panel__keyword-cat ld-tle-panel__effect-choices"></div>
           <input type="color" class="ld-tle-panel__keyword-color" value="#0969da" title="颜色标记颜色">
           <input type="number" class="ld-tle-panel__keyword-priority" value="5000" title="关键词优先级">
+          <label class="ld-tle-panel__keyword-ignorecase" title="忽略大小写：关闭后需大小写完全一致">
+            <input type="checkbox" class="ld-tle-panel__keyword-ignorecase-input" checked> 忽略大小写
+          </label>
           <button type="button" data-act="add-keyword">添加规则</button>
         </div>
       </section>
@@ -1152,12 +1167,13 @@
        const effectIds = [...panelEl.querySelectorAll('.ld-tle-panel__keyword-cat input:checked')].map((input) => input.value);
        const color = panelEl.querySelector('.ld-tle-panel__keyword-color').value;
        const priority = Number(panelEl.querySelector('.ld-tle-panel__keyword-priority').value);
+       const ignoreCase = panelEl.querySelector('.ld-tle-panel__keyword-ignorecase-input')?.checked !== false;
        if (!keyword || !effectIds.length) { showPanelMsg('请输入关键词并选择效果'); return; }
       if (keywordRules.some((r) => r.keyword.toLowerCase() === keyword.toLowerCase())) {
         showPanelMsg('关键词已存在');
         return;
       }
-       keywordRules.push({ id: `rule-${Date.now()}`, keyword, effectIds, color, priority: Number.isFinite(priority) ? priority : 5000, enabled: true });
+       keywordRules.push({ id: `rule-${Date.now()}`, keyword, effectIds, color, priority: Number.isFinite(priority) ? priority : 5000, ignoreCase, enabled: true });
       saveKeywordRules();
       input.value = '';
       renderKeywords();
@@ -1406,6 +1422,15 @@
        priority.title = '关键词优先级';
        priority.addEventListener('change', () => { rule.priority = Number(priority.value) || 0; saveKeywordRules(); applyMarks(); });
       enabled.addEventListener('change', () => { rule.enabled = enabled.checked; saveKeywordRules(); applyMarks(); });
+       const ignoreCase = document.createElement('label');
+       ignoreCase.className = 'ld-tle-panel__keyword-ignorecase';
+       ignoreCase.title = '忽略大小写：关闭后需大小写完全一致';
+       const ignoreCaseInput = document.createElement('input');
+       ignoreCaseInput.type = 'checkbox';
+       ignoreCaseInput.className = 'ld-tle-panel__keyword-ignorecase-input';
+       ignoreCaseInput.checked = rule.ignoreCase !== false;
+       ignoreCaseInput.addEventListener('change', () => { rule.ignoreCase = ignoreCaseInput.checked; saveKeywordRules(); applyMarks(); });
+       ignoreCase.append(ignoreCaseInput, document.createTextNode('Aa'));
        up.addEventListener('click', () => moveKeywordRule(rule.id, -1));
        down.addEventListener('click', () => moveKeywordRule(rule.id, 1));
        const dup = document.createElement('button');
@@ -1415,7 +1440,7 @@
        dup.title = '复制规则';
        dup.addEventListener('click', () => duplicateKeywordRule(rule.id));
        del.addEventListener('click', () => { keywordRules = keywordRules.filter((r) => r.id !== rule.id); saveKeywordRules(); renderKeywords(); applyMarks(); });
-        row.append(word, select, color, priority, enabled, up, down, dup, del);
+        row.append(word, ignoreCase, select, color, priority, enabled, up, down, dup, del);
       box.append(row);
     });
   }
@@ -2506,16 +2531,19 @@
        .ld-tle-panel__row-tag-picker-break { flex-basis: 100%; width: 0; height: 0; }
        .ld-tle-panel__row-tag-add { border-style: dashed; color: #0969da; }
         .ld-tle-panel__row-tag-picker { width: min(240px, 100%); max-width: 100%; min-width: 0; padding: 3px 5px; box-sizing: border-box; }
-        .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 28px 30px 30px 30px 38px; grid-template-rows: auto auto; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
+        .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) 34px 32px 68px 28px 30px 30px 30px 38px; grid-template-rows: auto auto; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
         .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-word { grid-column: 1; grid-row: 1; min-width: 0; }
-        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-color-input { grid-column: 2; grid-row: 1; width: 32px; height: 28px; padding: 0; border: 0; background: transparent; }
-        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-priority-input { grid-column: 3; grid-row: 1; }
-        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-enabled { grid-column: 4; grid-row: 1; }
-        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-up { grid-column: 5; grid-row: 1; }
-        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-down { grid-column: 6; grid-row: 1; }
-        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-copy { grid-column: 7; grid-row: 1; }
-        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-delete { grid-column: 8; grid-row: 1; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-ignorecase { grid-column: 2; grid-row: 1; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-color-input { grid-column: 3; grid-row: 1; width: 32px; height: 28px; padding: 0; border: 0; background: transparent; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-priority-input { grid-column: 4; grid-row: 1; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-enabled { grid-column: 5; grid-row: 1; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-up { grid-column: 6; grid-row: 1; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-down { grid-column: 7; grid-row: 1; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-copy { grid-column: 8; grid-row: 1; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-delete { grid-column: 9; grid-row: 1; }
        .ld-tle-panel__keyword-row > .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; width: 100%; }
+       .ld-tle-panel__keyword-ignorecase { display: inline-flex; align-items: center; gap: 3px; width: max-content; color: #57606a; font: 600 11px/16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; cursor: pointer; }
+       .ld-tle-panel__keyword-ignorecase-input { width: auto; margin: 0; }
       .ld-tle-panel__keywords { margin-bottom: 10px; border-top: 1px solid #eaeef2; }
       .ld-tle-panel__json { width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 10px; border-radius: 8px !important; line-height: 1.5; resize: vertical; }
       .ld-tle-panel__btns { padding-top: 8px; border-top: 1px solid #eaeef2; }
@@ -2542,7 +2570,7 @@
           .ld-tle-panel__row-tags { grid-row: 2; }
           .ld-tle-panel__cat { grid-template-columns: minmax(0, 1fr) 32px 68px 30px 30px 30px 38px; gap: 4px; }
          .ld-tle-panel__cat .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
-          .ld-tle-panel__keyword-row { grid-template-columns: minmax(0, 1fr) 32px 68px 28px 30px 30px 30px 38px; gap: 4px; }
+          .ld-tle-panel__keyword-row { grid-template-columns: minmax(0, 1fr) 34px 32px 68px 28px 30px 30px 30px 38px; gap: 4px; }
       }
       @media (prefers-color-scheme: dark) {
         .${CHIP_CLASS}--0 { color: #f0f6fc; background: #6e7681; }
