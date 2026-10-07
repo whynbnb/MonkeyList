@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.70.0
+// @version      0.70.1
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default) and can highlight the matched keyword inside the topic title. An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.70.0';
+  const SCRIPT_VERSION = '0.70.1';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -48,8 +48,8 @@
   ];
   const DEFAULT_EFFECTS = [
     { id: 'left-highlight', label: '左侧高亮', color: '#0969da', mode: 'normal', kind: 'color', priority: 30, hint: '为话题增加左侧颜色线' },
-    { id: 'tag-highlight', label: '关键词/tag 高亮', color: '#0969da', mode: 'normal', kind: 'tag', priority: 30, hint: '高亮匹配话题中的标签' },
-    { id: 'title-highlight', label: '标题关键词高亮', color: '#0969da', mode: 'normal', kind: 'title', priority: 30, hint: '高亮话题标题中命中的关键词' },
+    { id: 'tag-highlight', label: '标签/分类高亮', color: '#0969da', mode: 'normal', kind: 'tag', priority: 30, hint: '高亮命中关键词的标签与分类' },
+    { id: 'title-highlight', label: '标题高亮', color: '#0969da', mode: 'normal', kind: 'title', priority: 30, hint: '高亮标题中命中的关键词' },
     { id: 'normal', label: '无额外效果', color: '#6e7681', mode: 'normal', kind: 'none', priority: 0, hint: '只显示标记' },
     { id: 'lv1', label: 'Lv1颜色', color: '#0969da', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv1 左侧颜色线' },
     { id: 'lv2', label: 'Lv2颜色', color: '#1a7f37', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv2 左侧颜色线' },
@@ -144,7 +144,12 @@
       const saved = Array.isArray(raw) ? raw.map(normalizeEffect).filter(Boolean) : [];
       const byId = new Map(DEFAULT_EFFECTS.map((effect) => [effect.id, { ...effect }]));
       saved.forEach((effect) => {
-        byId.set(effect.id, { ...(byId.get(effect.id) || {}), ...effect });
+        const base = byId.get(effect.id);
+        // Built-in effect names/hints are canonical (they are not editable in the
+        // UI), so a saved copy can never freeze an outdated label after a rename.
+        byId.set(effect.id, base && base.builtin
+          ? { ...base, ...effect, label: base.label, hint: base.hint, kind: base.kind, mode: base.mode, builtin: true }
+          : { ...(base || {}), ...effect });
       });
       return [...byId.values()];
     } catch (e) {
@@ -290,7 +295,7 @@
     return effect ? effect.color : '';
   }
 
-  // Rules that hit the topic title and carry the「标题关键词高亮」effect. The
+  // Rules that hit the topic title and carry the「标题高亮」effect. The
   // winning color is the rule color; higher priority claims overlaps first.
   function titleHighlightEntries(keywordMatch) {
     const entries = [];
@@ -961,8 +966,16 @@
     let skipped = 0;
     importedEffects.forEach((effect) => {
       const current = getEffect(effect.id);
-      if (current) Object.assign(current, effect);
-      else effects.push(effect);
+      if (current) {
+        // Keep canonical names for built-in effects even when importing an old
+        // backup, so a rename is never reverted by imported labels.
+        const patch = current.builtin
+          ? { ...effect, label: current.label, hint: current.hint, kind: current.kind, mode: current.mode, builtin: true }
+          : effect;
+        Object.assign(current, patch);
+      } else {
+        effects.push(effect);
+      }
     });
     importedCats.forEach((cat) => {
       if (!getCat(cat.id)) cats.push(cat);
@@ -1435,7 +1448,7 @@
       const label = document.createElement('strong');
       label.textContent = effect.label;
       const kind = document.createElement('span');
-       kind.textContent = effect.kind === 'color' ? '左侧高亮' : effect.kind === 'tag' ? '关键词/tag 高亮' : effect.kind === 'title' ? '标题关键词高亮' : effect.kind === 'fade' ? '淡化' : effect.kind === 'strike' ? '删除线' : effect.kind === 'mosaic' ? '马赛克模糊' : effect.kind === 'badge' ? '提示标记' : '无';
+       kind.textContent = effect.kind === 'color' ? '左侧高亮' : effect.kind === 'tag' ? '标签/分类高亮' : effect.kind === 'title' ? '标题高亮' : effect.kind === 'fade' ? '淡化' : effect.kind === 'strike' ? '删除线' : effect.kind === 'mosaic' ? '马赛克模糊' : effect.kind === 'badge' ? '提示标记' : '无';
        const hint = document.createElement('small');
       hint.textContent = effect.hint;
       row.append(swatch, label, kind, hint);
