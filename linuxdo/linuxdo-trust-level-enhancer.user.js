@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.69.0
-// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default). An advanced master switch can temporarily suspend every page effect without touching saved data.
+// @version      0.70.0
+// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default) and can highlight the matched keyword inside the topic title. An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
 // @run-at       document-idle
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.69.0';
+  const SCRIPT_VERSION = '0.70.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -38,6 +38,7 @@
   const MARK_ADD = 'ld-tle-mark-add';
   const MARK_ROW = 'ld-tle-mark-row';
   const BOOST_MARK_CLASS = 'ld-tle-boost-mark';
+  const TITLE_MATCH_CLASS = 'ld-tle-title-match';
   const DEFAULT_CATS = [
     { id: 'block', label: '屏蔽', effectIds: ['fade-light'], color: '#6e7681', priority: 10000, hint: '弱化显示' },
     { id: 'caution', label: '注意', effectIds: ['left-highlight'], color: '#d4a72c', priority: 10000, hint: '黄色警示' },
@@ -48,6 +49,7 @@
   const DEFAULT_EFFECTS = [
     { id: 'left-highlight', label: '左侧高亮', color: '#0969da', mode: 'normal', kind: 'color', priority: 30, hint: '为话题增加左侧颜色线' },
     { id: 'tag-highlight', label: '关键词/tag 高亮', color: '#0969da', mode: 'normal', kind: 'tag', priority: 30, hint: '高亮匹配话题中的标签' },
+    { id: 'title-highlight', label: '标题关键词高亮', color: '#0969da', mode: 'normal', kind: 'title', priority: 30, hint: '高亮话题标题中命中的关键词' },
     { id: 'normal', label: '无额外效果', color: '#6e7681', mode: 'normal', kind: 'none', priority: 0, hint: '只显示标记' },
     { id: 'lv1', label: 'Lv1颜色', color: '#0969da', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv1 左侧颜色线' },
     { id: 'lv2', label: 'Lv2颜色', color: '#1a7f37', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv2 左侧颜色线' },
@@ -62,7 +64,7 @@
     { id: 'lonely', label: '待回复', color: '#9a6700', mode: 'normal', kind: 'badge', priority: 20, hint: '标记待回复主题' },
   ].map((effect) => ({ ...effect, builtin: true, enabled: true }));
   const BUILTIN_EFFECT_IDS = new Set(DEFAULT_EFFECTS.map((effect) => effect.id));
-  const EFFECT_LIBRARY_IDS = new Set(['left-highlight', 'tag-highlight', 'normal', 'fade-light', 'fade-deep', 'strike', 'mosaic']);
+  const EFFECT_LIBRARY_IDS = new Set(['left-highlight', 'tag-highlight', 'title-highlight', 'normal', 'fade-light', 'fade-deep', 'strike', 'mosaic']);
   const NAME_SEL = '.badge-category__name';
   const PROMO_TAGS = ['高级推广'];
   const LOTTERY_TAGS = ['抽奖'];
@@ -127,7 +129,7 @@
     if (!id || !label) return null;
     return {
       id, label, color, mode,
-      kind: ['none', 'color', 'tag', 'fade', 'strike', 'mosaic', 'badge'].includes(raw.kind) ? raw.kind : 'color',
+      kind: ['none', 'color', 'tag', 'title', 'fade', 'strike', 'mosaic', 'badge'].includes(raw.kind) ? raw.kind : 'color',
       priority: Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 0,
       opacity: Number.isFinite(Number(raw.opacity)) ? Math.max(0.1, Math.min(1, Number(raw.opacity))) : undefined,
       hint: String(raw.hint || '').trim(),
@@ -166,7 +168,7 @@
     const ids = Array.isArray(value) ? value : [value];
     return ids.flatMap((id) => {
       const effect = getEffect(id);
-      return effect ? [colorOverride && (effect.kind === 'color' || effect.kind === 'tag') ? { ...effect, color: colorOverride } : effect] : [];
+      return effect ? [colorOverride && (effect.kind === 'color' || effect.kind === 'tag' || effect.kind === 'title') ? { ...effect, color: colorOverride } : effect] : [];
     }).filter((effect) => effect && effect.enabled !== false);
   }
 
@@ -281,6 +283,108 @@
       });
     });
     return result;
+  }
+
+  function keywordTitleColor(match) {
+    const effect = (match.effects || []).find((item) => item.kind === 'title');
+    return effect ? effect.color : '';
+  }
+
+  // Rules that hit the topic title and carry the「标题关键词高亮」effect. The
+  // winning color is the rule color; higher priority claims overlaps first.
+  function titleHighlightEntries(keywordMatch) {
+    const entries = [];
+    if (!keywordMatch) return entries;
+    keywordMatch.matches.forEach((match) => {
+      if (!match.titleMatch || !match.rule.keyword) return;
+      const color = keywordTitleColor(match);
+      if (!color) return;
+      entries.push({
+        keyword: match.rule.keyword,
+        ignoreCase: match.rule.ignoreCase !== false,
+        color,
+        priority: match.rule.priority ?? 5000,
+      });
+    });
+    return entries.sort((a, b) => b.priority - a.priority || b.keyword.length - a.keyword.length);
+  }
+
+  function unwrapTitleMatch(span) {
+    const parent = span.parentNode;
+    if (!parent) return;
+    while (span.firstChild) parent.insertBefore(span.firstChild, span);
+    parent.removeChild(span);
+    parent.normalize();
+  }
+
+  // Find non-overlapping keyword occurrences in a text node, honouring each
+  // rule's case setting so the highlight matches the same way the rule does.
+  function collectTitleMatches(text, entries) {
+    const lower = text.toLowerCase();
+    const claimed = [];
+    entries.forEach((entry) => {
+      const haystack = entry.ignoreCase ? lower : text;
+      const needle = entry.ignoreCase ? entry.keyword.toLowerCase() : entry.keyword;
+      if (!needle) return;
+      let index = haystack.indexOf(needle);
+      while (index !== -1) {
+        const start = index;
+        const end = index + needle.length;
+        if (!claimed.some((range) => start < range.end && end > range.start)) {
+          claimed.push({ start, end, color: entry.color });
+        }
+        index = haystack.indexOf(needle, index + needle.length);
+      }
+    });
+    return claimed.sort((a, b) => a.start - b.start);
+  }
+
+  function wrapTitleTextNode(node, entries) {
+    const text = node.nodeValue || '';
+    const ranges = collectTitleMatches(text, entries);
+    if (!ranges.length) return;
+    const frag = document.createDocumentFragment();
+    let cursor = 0;
+    ranges.forEach((range) => {
+      if (range.start > cursor) frag.append(document.createTextNode(text.slice(cursor, range.start)));
+      const span = document.createElement('span');
+      span.className = TITLE_MATCH_CLASS;
+      span.style.setProperty('--ld-tle-title-color', range.color);
+      span.textContent = text.slice(range.start, range.end);
+      frag.append(span);
+      cursor = range.end;
+    });
+    if (cursor < text.length) frag.append(document.createTextNode(text.slice(cursor)));
+    node.parentNode.replaceChild(frag, node);
+  }
+
+  // Wrap the matched keyword inside a topic title with a highlight span. Runs
+  // while the mutation observer is disconnected, and skips unchanged titles so
+  // repeated passes do not keep re-wrapping.
+  function highlightTitleKeywords(row, keywordMatch) {
+    const host = row.querySelector('.raw-topic-link, a.title');
+    if (!host) return;
+    const entries = titleHighlightEntries(keywordMatch);
+    const rawText = host.textContent || '';
+    const signature = `${entries.map((entry) => `${entry.ignoreCase ? 'i' : 's'}:${entry.color}:${entry.keyword}`).join('|')}#${rawText}`;
+    const wrapped = host.querySelector('.' + TITLE_MATCH_CLASS);
+    if (host.dataset.ldTleTitleSig === signature && (entries.length === 0 || wrapped)) return;
+    host.querySelectorAll('.' + TITLE_MATCH_CLASS).forEach(unwrapTitleMatch);
+    if (entries.length) {
+      const nodes = [];
+      const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const parent = node.parentElement;
+          if (!parent || !node.nodeValue) return NodeFilter.FILTER_REJECT;
+          if (parent.closest('.ld-tle-keyword-badge, .' + MARK_BADGE)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
+      let node;
+      while ((node = walker.nextNode())) nodes.push(node);
+      nodes.forEach((item) => wrapTitleTextNode(item, entries));
+    }
+    host.dataset.ldTleTitleSig = signature;
   }
 
   function moveKeywordRule(id, direction) {
@@ -505,6 +609,7 @@
       resolveKeywordColors(keywordMatch).forEach((info, el) => {
         el.style.setProperty('--ld-tle-tag-color', info.color);
       });
+      highlightTitleKeywords(row, keywordMatch);
       const candidates = [];
       if (mark) {
         markEffects(mark).forEach((effect) => candidates.push(effect));
@@ -1330,7 +1435,7 @@
       const label = document.createElement('strong');
       label.textContent = effect.label;
       const kind = document.createElement('span');
-       kind.textContent = effect.kind === 'color' ? '左侧高亮' : effect.kind === 'tag' ? '关键词/tag 高亮' : effect.kind === 'fade' ? '淡化' : effect.kind === 'strike' ? '删除线' : effect.kind === 'mosaic' ? '马赛克模糊' : effect.kind === 'badge' ? '提示标记' : '无';
+       kind.textContent = effect.kind === 'color' ? '左侧高亮' : effect.kind === 'tag' ? '关键词/tag 高亮' : effect.kind === 'title' ? '标题关键词高亮' : effect.kind === 'fade' ? '淡化' : effect.kind === 'strike' ? '删除线' : effect.kind === 'mosaic' ? '马赛克模糊' : effect.kind === 'badge' ? '提示标记' : '无';
        const hint = document.createElement('small');
       hint.textContent = effect.hint;
       row.append(swatch, label, kind, hint);
@@ -1926,6 +2031,8 @@
         el.classList.remove('ld-tle-keyword-match');
         el.style.removeProperty('--ld-tle-tag-color');
       });
+      row.querySelectorAll('.' + TITLE_MATCH_CLASS).forEach(unwrapTitleMatch);
+      row.querySelectorAll('[data-ld-tle-title-sig]').forEach((el) => { delete el.dataset.ldTleTitleSig; });
       delete row.__ldTleDebug;
     });
     document.querySelectorAll('td.' + ROW_CLASS).forEach((td) => {
@@ -2614,6 +2721,14 @@
         .ld-tle-panel__keywords, .ld-tle-panel__keyword-row { border-color: #30363d; }
         .ld-tle-panel__bar button, .ld-tle-panel__btns button, .ld-tle-panel__row button { background: #0d1117; border-color: #30363d; color: #c9d1d9; }
         .ld-tle-panel__sec, .ld-tle-panel__btns { border-color: #30363d; }
+      }
+
+      /* Keyword highlight inside the topic title */
+      .${TITLE_MATCH_CLASS} {
+        color: var(--ld-tle-title-color, #0969da);
+        background: color-mix(in srgb, var(--ld-tle-title-color, #0969da) 16%, transparent);
+        border-radius: 3px;
+        padding: 0 1px;
       }
 
       /* Advanced: master switch that temporarily suspends every page effect */
