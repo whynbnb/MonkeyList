@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.5.1
+// @version      0.5.2
 // @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64) and ranking package formats (Linux: AppImage > deb > rpm; Windows: portable > zip > setup) while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
@@ -369,10 +369,10 @@
       }
       .gh-ran-mobile { border-left-color: #bf8700; }
       .gh-ran-desktop { border-left-color: #0969da; }
-      /* Package preference overrides the device accent: green > amber > grey. */
-      .gh-ran-pkg-rank-1 { border-left-color: #1a7f37; background-image: linear-gradient(90deg, rgb(26 127 55 / .12), rgb(26 127 55 / 0) 50%); }
-      .gh-ran-pkg-rank-2 { border-left-color: #bf8700; background-image: linear-gradient(90deg, rgb(191 135 0 / .12), rgb(191 135 0 / 0) 50%); }
-      .gh-ran-pkg-rank-3 { border-left-color: #8c959f; background-image: linear-gradient(90deg, rgb(110 118 129 / .08), rgb(110 118 129 / 0) 50%); }
+      /* Package preference uses one hue with three intensity levels: dark > medium > light. */
+      .gh-ran-pkg-rank-1 { border-left-color: #116329; background-image: linear-gradient(90deg, rgb(17 99 41 / .18), rgb(17 99 41 / 0) 50%); }
+      .gh-ran-pkg-rank-2 { border-left-color: #2da44e; background-image: linear-gradient(90deg, rgb(45 164 78 / .12), rgb(45 164 78 / 0) 50%); }
+      .gh-ran-pkg-rank-3 { border-left-color: #7ee787; background-image: linear-gradient(90deg, rgb(126 231 135 / .06), rgb(126 231 135 / 0) 50%); }
       @media (min-width: 768px) {
         .gh-ran-asset > div:first-child {
           flex: 1 1 auto !important;
@@ -414,9 +414,9 @@
       .gh-ran-badge--architecture { color: #8250df; background: #fbefff; border-color: #d8b4fe; }
       .gh-ran-badge--architecture.gh-ran-badge--preferred { color: #fff; background: #1a7f37; border-color: #116329; }
       .gh-ran-badge--package { color: #1a7f37; background: #dafbe1; border-color: #7ee787; }
-      .gh-ran-badge--package.gh-ran-badge--package-tier-1 { color: #fff; background: #1a7f37; border-color: #116329; }
-      .gh-ran-badge--package.gh-ran-badge--package-tier-2 { color: #9a6700; background: #fff8c5; border-color: #d4a72c; }
-      .gh-ran-badge--package.gh-ran-badge--package-tier-3 { color: #57606a; background: #f6f8fa; border-color: #d8dee4; }
+      .gh-ran-badge--package.gh-ran-badge--package-tier-1 { color: #fff; background: #116329; border-color: #0a3622; }
+      .gh-ran-badge--package.gh-ran-badge--package-tier-2 { color: #fff; background: #2da44e; border-color: #1a7f37; }
+      .gh-ran-badge--package.gh-ran-badge--package-tier-3 { color: #2da44e; background: #f0fff4; border-color: #a7e3b1; }
       .gh-ran-digest {
         position: relative;
         flex: 0 0 auto !important;
@@ -558,13 +558,13 @@
         .gh-ran-badge--architecture { color: #d2a8ff; background: #2d1f4e; border-color: #8957e5; }
         .gh-ran-badge--architecture.gh-ran-badge--preferred { color: #fff; background: #238636; border-color: #2ea043; }
         .gh-ran-preferred { background-image: linear-gradient(90deg, rgb(46 160 67 / .16), rgb(46 160 67 / 0) 45%); }
-        .gh-ran-pkg-rank-1 { border-left-color: #2ea043; background-image: linear-gradient(90deg, rgb(46 160 67 / .20), rgb(46 160 67 / 0) 50%); }
-        .gh-ran-pkg-rank-2 { border-left-color: #d4a72c; background-image: linear-gradient(90deg, rgb(212 167 44 / .18), rgb(212 167 44 / 0) 50%); }
-        .gh-ran-pkg-rank-3 { border-left-color: #6e7681; background-image: linear-gradient(90deg, rgb(139 148 158 / .12), rgb(139 148 158 / 0) 50%); }
+        .gh-ran-pkg-rank-1 { border-left-color: #3fb950; background-image: linear-gradient(90deg, rgb(63 185 80 / .26), rgb(63 185 80 / 0) 50%); }
+        .gh-ran-pkg-rank-2 { border-left-color: #1a7f37; background-image: linear-gradient(90deg, rgb(26 127 55 / .16), rgb(26 127 55 / 0) 50%); }
+        .gh-ran-pkg-rank-3 { border-left-color: #14532d; background-image: linear-gradient(90deg, rgb(126 231 135 / .08), rgb(126 231 135 / 0) 50%); }
         .gh-ran-badge--package { color: #7ee787; background: #173c24; border-color: #2ea043; }
-        .gh-ran-badge--package.gh-ran-badge--package-tier-1 { color: #fff; background: #238636; border-color: #2ea043; }
-        .gh-ran-badge--package.gh-ran-badge--package-tier-2 { color: #e3b341; background: #3d2e00; border-color: #9e6a03; }
-        .gh-ran-badge--package.gh-ran-badge--package-tier-3 { color: #8b949e; background: #21262d; border-color: #30363d; }
+        .gh-ran-badge--package.gh-ran-badge--package-tier-1 { color: #fff; background: #2ea043; border-color: #3fb950; }
+        .gh-ran-badge--package.gh-ran-badge--package-tier-2 { color: #fff; background: #1a7f37; border-color: #2ea043; }
+        .gh-ran-badge--package.gh-ran-badge--package-tier-3 { color: #7ee787; background: #0f2a18; border-color: #1a7f37; }
       }
     `;
     document.head.append(style);
