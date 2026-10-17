@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.4.0
-// @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64) while de-emphasizing metadata and source archives.
+// @version      0.5.0
+// @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64) and ranking package formats (Linux: AppImage > deb > rpm; Windows: portable > zip > setup) while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
 // @run-at       document-idle
@@ -68,6 +68,22 @@
     return PLATFORM.find(([, , pattern]) => pattern.test(value));
   }
 
+  // Preferred package format per platform: lower is better.
+  // Linux: AppImage > deb > rpm. Windows: portable > zip > setup.
+  const PACKAGE_TIER = {
+    Linux: { AppImage: 1, DEB: 2, RPM: 3 },
+    Windows: { ZIP: 2 },
+  };
+
+  function getPackageInfo(name, system) {
+    const type = firstMatch(name, PACKAGE_TYPE);
+    if (system === 'Windows') {
+      if (/(?:^|[-_.])portable(?:$|[-_.])/i.test(name)) return { label: 'Portable', tier: 1 };
+      if (/(?:^|[-_.])(?:setup|installer)(?:$|[-_.])/i.test(name)) return { label: 'Setup', tier: 3 };
+    }
+    return { label: type, tier: PACKAGE_TIER[system]?.[type] || 0 };
+  }
+
   function createBadge(text, kind) {
     const badge = document.createElement('span');
     badge.className = `gh-ran-badge gh-ran-badge--${kind}`;
@@ -120,7 +136,7 @@
 
     const platform = findPlatform(name);
     const architecture = firstMatch(name, ARCHITECTURE);
-    const packageType = firstMatch(name, PACKAGE_TYPE);
+    const packageInfo = getPackageInfo(name, platform?.[1]);
     const badges = document.createElement('span');
     badges.className = 'gh-ran-badges';
 
@@ -129,6 +145,7 @@
       badges.append(createBadge(device === 'mobile' ? 'MOBILE' : 'DESKTOP', `device-${device}`));
       badges.append(createBadge(system, `platform-${system.toLowerCase()}`));
       row.classList.add(`gh-ran-${device}`);
+      row.dataset.ghRanSystem = system;
     }
     const preferred = !!(platform && architecture && PREFERRED_ARCH[platform[1]] === architecture);
     if (architecture) {
@@ -138,14 +155,60 @@
         badge.title = `Recommended ${platform[1]} build`;
       }
       badges.append(badge);
+      row.dataset.ghRanArch = architecture;
     }
-    if (packageType) badges.append(createBadge(packageType, 'package'));
+    if (packageInfo.label) {
+      const badge = createBadge(packageInfo.label, 'package');
+      badge.classList.add('gh-ran-package-badge');
+      badge.dataset.ghRanPkgLabel = packageInfo.label;
+      if (packageInfo.tier) badge.dataset.ghRanPkgTier = String(packageInfo.tier);
+      badges.append(badge);
+    }
     if (preferred) row.classList.add('gh-ran-preferred');
 
     if (badges.childElementCount) {
       link.insertAdjacentElement('afterend', badges);
       row.classList.add('gh-ran-asset');
     }
+  }
+
+  function rankPackages() {
+    const groups = new Map();
+    document.querySelectorAll('.gh-ran-package-badge').forEach((badge) => {
+      const tier = Number(badge.dataset.ghRanPkgTier) || 0;
+      const row = badge.closest('.gh-ran-asset');
+      if (!tier || !row) return;
+      const key = `${row.dataset.ghRanSystem || ''}|${row.dataset.ghRanArch || ''}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ badge, row, tier });
+    });
+
+    groups.forEach((entries) => {
+      // Rank only the formats actually present for this platform + architecture,
+      // so a lone rpm is not labelled "#3" just because better formats exist in
+      // theory.
+      const tiers = [...new Set(entries.map((entry) => entry.tier))].sort((a, b) => a - b);
+      const ranked = tiers.length > 1;
+      entries.forEach(({ badge, row, tier }) => {
+        const label = badge.dataset.ghRanPkgLabel || badge.textContent;
+        badge.classList.remove(
+          'gh-ran-badge--package-tier-1',
+          'gh-ran-badge--package-tier-2',
+          'gh-ran-badge--package-tier-3'
+        );
+        if (!ranked) {
+          badge.textContent = label;
+          badge.removeAttribute('title');
+          return;
+        }
+        const rank = tiers.indexOf(tier) + 1;
+        badge.textContent = `#${rank} ${label}`;
+        badge.classList.add(`gh-ran-badge--package-tier-${rank}`);
+        const system = row.dataset.ghRanSystem || 'this platform';
+        const hint = rank === 1 ? 'Best' : rank === 2 ? 'Alternative' : 'Least preferred';
+        badge.title = `${hint} package format for ${system}`;
+      });
+    });
   }
 
   function processSourceCode() {
@@ -258,6 +321,7 @@
   function processPage() {
     addStyles();
     findAssetRows().forEach(processAsset);
+    rankPackages();
     groupChecksums();
     processSourceCode();
     processAttestations();
@@ -344,6 +408,8 @@
       .gh-ran-badge--architecture { color: #8250df; background: #fbefff; border-color: #d8b4fe; }
       .gh-ran-badge--architecture.gh-ran-badge--preferred { color: #fff; background: #1a7f37; border-color: #116329; }
       .gh-ran-badge--package { color: #1a7f37; background: #dafbe1; border-color: #7ee787; }
+      .gh-ran-badge--package.gh-ran-badge--package-tier-1 { color: #fff; background: #1a7f37; border-color: #116329; }
+      .gh-ran-badge--package.gh-ran-badge--package-tier-3 { color: #57606a; background: #f6f8fa; border-color: #d8dee4; }
       .gh-ran-digest {
         position: relative;
         flex: 0 0 auto !important;
@@ -486,6 +552,8 @@
         .gh-ran-badge--architecture.gh-ran-badge--preferred { color: #fff; background: #238636; border-color: #2ea043; }
         .gh-ran-preferred { background-image: linear-gradient(90deg, rgb(46 160 67 / .16), rgb(46 160 67 / 0) 45%); }
         .gh-ran-badge--package { color: #7ee787; background: #173c24; border-color: #2ea043; }
+        .gh-ran-badge--package.gh-ran-badge--package-tier-1 { color: #fff; background: #238636; border-color: #2ea043; }
+        .gh-ran-badge--package.gh-ran-badge--package-tier-3 { color: #8b949e; background: #21262d; border-color: #30363d; }
       }
     `;
     document.head.append(style);
