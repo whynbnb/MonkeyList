@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.71.2
+// @version      0.72.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories can each carry a per-user note that is marked with a small dot on the label and revealed on hover, override all other row/post effects, and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default) and can highlight the matched keyword inside the topic title. An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.71.2';
+  const SCRIPT_VERSION = '0.72.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -759,7 +759,9 @@
       const binding = mark.groups.find((item) => item.id === id) || { reason: '' };
       if (group) {
         const reason = String(binding.reason || '').trim();
-        wanted.push({ kind: 'group-tag', id: group.id, label: group.label, title: reason || group.label, color: group.color || '#0969da', hasNote: !!reason });
+        // With a note we render our own tooltip, so suppress the native title to
+        // avoid two overlapping tooltips; without one keep the label as the title.
+        wanted.push({ kind: 'group-tag', id: group.id, label: group.label, title: reason ? '' : group.label, note: reason, color: group.color || '#0969da', hasNote: !!reason });
       }
     });
     [...host.children].forEach((el) => {
@@ -780,9 +782,15 @@
       if (badge.className !== cls) badge.className = cls;
       if (badge.textContent !== item.label) badge.textContent = item.label;
       if (badge.title !== item.title) badge.title = item.title;
-      // A small dot marks labels that carry a note; the full note shows on hover.
-      if (item.hasNote) badge.dataset.ldTleNote = '1';
-      else delete badge.dataset.ldTleNote;
+      // A small dot marks labels that carry a note; the full note shows in a
+      // styled tooltip on hover (see [data-ld-tle-note-text] in the styles).
+      if (item.hasNote) {
+        badge.dataset.ldTleNote = '1';
+        if (badge.dataset.ldTleNoteText !== item.note) badge.dataset.ldTleNoteText = item.note;
+      } else {
+        delete badge.dataset.ldTleNote;
+        delete badge.dataset.ldTleNoteText;
+      }
     });
     existing.filter((el) => !used.has(el)).forEach((el) => el.remove());
     if (username) attachMarkButton(host, username);
@@ -2298,6 +2306,35 @@
         background: #fff;
         box-shadow: 0 0 0 1px rgba(31, 35, 40, .35);
       }
+      /* Styled tooltip that reveals the note when hovering a forum label. */
+      [data-ld-tle-note-text]::before {
+        content: attr(data-ld-tle-note-text);
+        position: absolute;
+        z-index: 30;
+        left: 50%;
+        bottom: calc(100% + 7px);
+        width: max-content;
+        max-width: min(280px, calc(100vw - 24px));
+        padding: 5px 8px;
+        border: 1px solid #d0d7de;
+        border-radius: 6px;
+        color: #24292f;
+        background: #fff;
+        box-shadow: 0 3px 12px rgba(31, 35, 40, .18);
+        font: 500 12px/17px ui-sans-serif, system-ui, sans-serif;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        text-align: left;
+        opacity: 0;
+        pointer-events: none;
+        transform: translate(-50%, 4px);
+        transition: opacity .12s ease, transform .12s ease;
+      }
+      [data-ld-tle-note-text]:hover::before,
+      [data-ld-tle-note-text]:focus-visible::before {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
       #user-card .${MARK_ROW}, .user-card .${MARK_ROW}, .d-user-card .${MARK_ROW} {
         margin-top: 10px;
         gap: 8px;
@@ -2586,6 +2623,8 @@
         img.ld-tle-op.ld-tle-op--4 { box-shadow: 0 0 0 2px #8957e5 !important; }
         .${MARK_ADD} { border-color: #30363d; color: #8b949e; }
         .${MARK_ADD}:hover { background: #21262d; }
+        [data-ld-tle-note="1"]::after { background: #0d1117; box-shadow: 0 0 0 1px rgba(240, 246, 252, .55); }
+        [data-ld-tle-note-text]::before { color: #c9d1d9; background: #161b22; border-color: #30363d; box-shadow: 0 3px 12px rgba(0, 0, 0, .5); }
         .ld-tle-picker, .ld-tle-panel { background: #161b22; border-color: #30363d; color: #c9d1d9; }
         .ld-tle-picker__levels, .ld-tle-picker__lv, .ld-tle-picker__note, .ld-tle-picker__actions button,
         .ld-tle-panel__q, .ld-tle-panel__filter, .ld-tle-panel__json,
