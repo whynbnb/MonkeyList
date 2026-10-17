@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.73.0
+// @version      0.73.1
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories can each carry a group note (plus an optional per-user note) that is marked with a small dot on the label and revealed in a styled tooltip on hover, override all other row/post effects, and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default) and can highlight the matched keyword inside the topic title. An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.73.0';
+  const SCRIPT_VERSION = '0.73.1';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -931,7 +931,24 @@
       }
     });
     importedCats.forEach((cat) => {
-      if (!getCat(cat.id)) cats.push(cat);
+      const current = getCat(cat.id);
+      if (!current) {
+        cats.push(cat);
+        return;
+      }
+      if (mode === 'skip') return;
+      if (mode === 'replace') {
+        Object.assign(current, cat);
+        return;
+      }
+      // Merge: apply the imported definition so renamed labels (and color,
+      // priority, effects) propagate to the existing group. Keep the local
+      // note/hint when the backup predates those fields and leaves them empty.
+      const prevNote = current.note;
+      const prevHint = current.hint;
+      Object.assign(current, cat);
+      if (!cat.note) current.note = prevNote || '';
+      if (!cat.hint) current.hint = prevHint || '';
     });
     importedRules.forEach((rule) => {
       if (!keywordRules.some((r) => r.keyword.toLowerCase() === rule.keyword.toLowerCase())) keywordRules.push(rule);
@@ -962,6 +979,11 @@
     saveMarks();
     updateMarkStyles();
     applyMarks();
+    if (panelEl && panelEl.classList.contains('is-open')) {
+      renderEffects();
+      renderCats();
+      renderKeywords();
+    }
     return { added, updated, skipped };
   }
 
