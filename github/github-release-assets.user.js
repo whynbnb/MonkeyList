@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.3.2
-// @description  Highlight platform, architecture, and package type in GitHub release assets while de-emphasizing metadata and source archives.
+// @version      0.4.0
+// @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64) while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
 // @run-at       document-idle
@@ -23,17 +23,25 @@
   const PLATFORM = [
     ['mobile', 'Android', /(?:^|[-_.])android(?:$|[-_.])|\.(?:apk|aab)$/i],
     ['mobile', 'iOS', /(?:^|[-_.])(?:ios|iphone|ipad)(?:$|[-_.])|\.ipa$/i],
-    ['desktop', 'Windows', /(?:^|[-_.])(?:win(?:dows)?)(?:$|[-_.])|\.(?:exe|msi|msix|appx)$/i],
+    ['desktop', 'Windows', /(?:^|[-_.])(?:windows|win(?:32|64)?)(?:$|[-_.])|\.(?:exe|msi|msix|appx)$/i],
     ['desktop', 'macOS', /(?:^|[-_.])(?:mac(?:os)?|osx|darwin)(?:$|[-_.])|\.(?:dmg|pkg)$/i],
     ['desktop', 'Linux', /(?:^|[-_.])(?:linux|ubuntu|debian|fedora|appimage)(?:$|[-_.])|\.appimage$/i],
   ];
   const ARCHITECTURE = [
-    ['ARM64', /(?:^|[-_.])(?:arm64|aarch64)(?:$|[-_.])/i],
-    ['ARM', /(?:^|[-_.])(?:armv?[5-8](?:l|hf)?|arm32)(?:$|[-_.])/i],
-    ['x64', /(?:^|[-_.])(?:x64|x86_64|amd64)(?:$|[-_.])/i],
+    ['ARM64', /(?:^|[-_.])(?:arm64(?:-v8a)?|aarch64|v8a|apple[-_.]?silicon)(?:$|[-_.])/i],
+    ['ARM', /(?:^|[-_.])(?:armv?[5-8](?:l|hf)?|arm32|armeabi(?:-v7a)?|v7a)(?:$|[-_.])/i],
+    ['x64', /(?:^|[-_.])(?:x64|x86[_-]64|amd64|win64)(?:$|[-_.])/i],
     ['x86', /(?:^|[-_.])(?:x86|i[3-6]86|ia32|win32)(?:$|[-_.])/i],
     ['Universal', /(?:^|[-_.])(?:universal|all)(?:$|[-_.])/i],
   ];
+  // The mainstream 64-bit target for each platform. These assets get an extra
+  // "recommended" highlight so the right download is obvious at a glance.
+  const PREFERRED_ARCH = {
+    Android: 'ARM64',
+    macOS: 'ARM64',
+    Windows: 'x64',
+    Linux: 'x64',
+  };
   const PACKAGE_TYPE = [
     ['APK', /\.apk$/i],
     ['AAB', /\.aab$/i],
@@ -122,8 +130,17 @@
       badges.append(createBadge(system, `platform-${system.toLowerCase()}`));
       row.classList.add(`gh-ran-${device}`);
     }
-    if (architecture) badges.append(createBadge(architecture, 'architecture'));
+    const preferred = !!(platform && architecture && PREFERRED_ARCH[platform[1]] === architecture);
+    if (architecture) {
+      const badge = createBadge(preferred ? `★ ${architecture}` : architecture, 'architecture');
+      if (preferred) {
+        badge.classList.add('gh-ran-badge--preferred');
+        badge.title = `Recommended ${platform[1]} build`;
+      }
+      badges.append(badge);
+    }
     if (packageType) badges.append(createBadge(packageType, 'package'));
+    if (preferred) row.classList.add('gh-ran-preferred');
 
     if (badges.childElementCount) {
       link.insertAdjacentElement('afterend', badges);
@@ -281,6 +298,9 @@
         position: relative;
         border-left: 4px solid transparent;
       }
+      .gh-ran-preferred {
+        background-image: linear-gradient(90deg, rgb(26 127 55 / .07), rgb(26 127 55 / 0) 45%);
+      }
       .gh-ran-mobile { border-left-color: #bf8700; }
       .gh-ran-desktop { border-left-color: #0969da; }
       @media (min-width: 768px) {
@@ -322,6 +342,7 @@
       .gh-ran-badge--platform-macos { color: #57606a; background: #f6f8fa; border-color: #8c959f; }
       .gh-ran-badge--platform-linux { color: #9a6700; background: #fff8c5; border-color: #d4a72c; }
       .gh-ran-badge--architecture { color: #8250df; background: #fbefff; border-color: #d8b4fe; }
+      .gh-ran-badge--architecture.gh-ran-badge--preferred { color: #fff; background: #1a7f37; border-color: #116329; }
       .gh-ran-badge--package { color: #1a7f37; background: #dafbe1; border-color: #7ee787; }
       .gh-ran-digest {
         position: relative;
@@ -462,6 +483,8 @@
         .gh-ran-file-time { color: #8b949e; background: #21262d; border-color: #30363d; }
         .gh-ran-file-time::before { border-color: #a371f7; box-shadow: inset 2px -1px 0 -1px #a371f7; }
         .gh-ran-badge--architecture { color: #d2a8ff; background: #2d1f4e; border-color: #8957e5; }
+        .gh-ran-badge--architecture.gh-ran-badge--preferred { color: #fff; background: #238636; border-color: #2ea043; }
+        .gh-ran-preferred { background-image: linear-gradient(90deg, rgb(46 160 67 / .16), rgb(46 160 67 / 0) 45%); }
         .gh-ran-badge--package { color: #7ee787; background: #173c24; border-color: #2ea043; }
       }
     `;
