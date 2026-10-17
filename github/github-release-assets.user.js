@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.5.2
-// @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64) and ranking package formats (Linux: AppImage > deb > rpm; Windows: portable > zip > setup) while de-emphasizing metadata and source archives.
+// @version      0.6.0
+// @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64), ranking package formats with per-platform color steps (Linux: AppImage > deb > rpm; Windows: portable > zip > setup), and separating platform groups while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
 // @run-at       document-idle
@@ -145,6 +145,7 @@
       badges.append(createBadge(device === 'mobile' ? 'MOBILE' : 'DESKTOP', `device-${device}`));
       badges.append(createBadge(system, `platform-${system.toLowerCase()}`));
       row.classList.add(`gh-ran-${device}`);
+      row.classList.add(`gh-ran-system-${system.toLowerCase()}`);
       row.dataset.ghRanSystem = system;
     }
     const preferred = !!(platform && architecture && PREFERRED_ARCH[platform[1]] === architecture);
@@ -164,8 +165,6 @@
       if (packageInfo.tier) badge.dataset.ghRanPkgTier = String(packageInfo.tier);
       badges.append(badge);
     }
-    if (preferred) row.classList.add('gh-ran-preferred');
-
     if (badges.childElementCount) {
       link.insertAdjacentElement('afterend', badges);
       row.classList.add('gh-ran-asset');
@@ -210,6 +209,17 @@
         const hint = rank === 1 ? 'Best' : rank === 2 ? 'Alternative' : 'Least preferred';
         badge.title = `${hint} package format for ${system}`;
       });
+    });
+  }
+
+  function markPlatformGroups() {
+    let previous = '';
+    document.querySelectorAll('.gh-ran-asset').forEach((row) => {
+      const system = row.dataset.ghRanSystem || '';
+      // Add a gap + divider whenever the platform changes, so Android, macOS,
+      // Windows and Linux read as separate sections instead of one long list.
+      row.classList.toggle('gh-ran-group-start', !!system && !!previous && system !== previous);
+      if (system) previous = system;
     });
   }
 
@@ -324,6 +334,7 @@
     addStyles();
     findAssetRows().forEach(processAsset);
     rankPackages();
+    markPlatformGroups();
     groupChecksums();
     processSourceCode();
     processAttestations();
@@ -364,15 +375,38 @@
         position: relative;
         border-left: 4px solid transparent;
       }
-      .gh-ran-preferred {
-        background-image: linear-gradient(90deg, rgb(26 127 55 / .07), rgb(26 127 55 / 0) 45%);
+      /* Each platform owns one hue; package tiers are intensity steps of it. */
+      .gh-ran-system-android {
+        --pkg-base-bg: #dafbe1; --pkg-base-fg: #1a7f37; --pkg-base-border: #7ee787;
+        --pkg-1-bg: #116329; --pkg-1-fg: #fff; --pkg-1-border: #0a3622; --pkg-1-edge: #116329; --pkg-1-tint: rgb(17 99 41 / .18);
+        --pkg-2-bg: #2da44e; --pkg-2-fg: #fff; --pkg-2-border: #1a7f37; --pkg-2-edge: #2da44e; --pkg-2-tint: rgb(45 164 78 / .12);
+        --pkg-3-bg: #f0fff4; --pkg-3-fg: #2da44e; --pkg-3-border: #a7e3b1; --pkg-3-edge: #7ee787; --pkg-3-tint: rgb(126 231 135 / .06);
+      }
+      .gh-ran-system-macos {
+        --pkg-base-bg: #f6f8fa; --pkg-base-fg: #57606a; --pkg-base-border: #8c959f;
+        --pkg-1-bg: #24292f; --pkg-1-fg: #fff; --pkg-1-border: #1b1f24; --pkg-1-edge: #424a53; --pkg-1-tint: rgb(66 74 83 / .16);
+        --pkg-2-bg: #57606a; --pkg-2-fg: #fff; --pkg-2-border: #424a53; --pkg-2-edge: #6e7681; --pkg-2-tint: rgb(87 96 106 / .12);
+        --pkg-3-bg: #f6f8fa; --pkg-3-fg: #57606a; --pkg-3-border: #d8dee4; --pkg-3-edge: #d0d7de; --pkg-3-tint: rgb(140 149 159 / .06);
+      }
+      .gh-ran-system-windows {
+        --pkg-base-bg: #ddf4ff; --pkg-base-fg: #0969da; --pkg-base-border: #54aeff;
+        --pkg-1-bg: #0550ae; --pkg-1-fg: #fff; --pkg-1-border: #033d8b; --pkg-1-edge: #0550ae; --pkg-1-tint: rgb(5 80 174 / .16);
+        --pkg-2-bg: #0969da; --pkg-2-fg: #fff; --pkg-2-border: #0550ae; --pkg-2-edge: #0969da; --pkg-2-tint: rgb(9 105 218 / .12);
+        --pkg-3-bg: #ddf4ff; --pkg-3-fg: #0969da; --pkg-3-border: #54aeff; --pkg-3-edge: #54aeff; --pkg-3-tint: rgb(84 174 255 / .07);
+      }
+      .gh-ran-system-linux {
+        --pkg-base-bg: #fff8c5; --pkg-base-fg: #9a6700; --pkg-base-border: #d4a72c;
+        --pkg-1-bg: #7d4e00; --pkg-1-fg: #fff; --pkg-1-border: #5c3a00; --pkg-1-edge: #9a6700; --pkg-1-tint: rgb(154 103 0 / .16);
+        --pkg-2-bg: #bf8700; --pkg-2-fg: #fff; --pkg-2-border: #9a6700; --pkg-2-edge: #bf8700; --pkg-2-tint: rgb(191 135 0 / .12);
+        --pkg-3-bg: #fff8c5; --pkg-3-fg: #9a6700; --pkg-3-border: #d4a72c; --pkg-3-edge: #eac54f; --pkg-3-tint: rgb(212 167 44 / .07);
       }
       .gh-ran-mobile { border-left-color: #bf8700; }
       .gh-ran-desktop { border-left-color: #0969da; }
-      /* Package preference uses one hue with three intensity levels: dark > medium > light. */
-      .gh-ran-pkg-rank-1 { border-left-color: #116329; background-image: linear-gradient(90deg, rgb(17 99 41 / .18), rgb(17 99 41 / 0) 50%); }
-      .gh-ran-pkg-rank-2 { border-left-color: #2da44e; background-image: linear-gradient(90deg, rgb(45 164 78 / .12), rgb(45 164 78 / 0) 50%); }
-      .gh-ran-pkg-rank-3 { border-left-color: #7ee787; background-image: linear-gradient(90deg, rgb(126 231 135 / .06), rgb(126 231 135 / 0) 50%); }
+      /* Package preference: ranks reuse the platform hue at three intensities. */
+      .gh-ran-pkg-rank-1 { border-left-color: var(--pkg-1-edge, #116329); background-image: linear-gradient(90deg, var(--pkg-1-tint, rgb(17 99 41 / .18)), transparent 50%); }
+      .gh-ran-pkg-rank-2 { border-left-color: var(--pkg-2-edge, #2da44e); background-image: linear-gradient(90deg, var(--pkg-2-tint, rgb(45 164 78 / .12)), transparent 50%); }
+      .gh-ran-pkg-rank-3 { border-left-color: var(--pkg-3-edge, #7ee787); background-image: linear-gradient(90deg, var(--pkg-3-tint, rgb(126 231 135 / .06)), transparent 50%); }
+      .gh-ran-group-start { margin-top: 12px; border-top: 1px solid var(--borderColor-muted, #d8dee4); }
       @media (min-width: 768px) {
         .gh-ran-asset > div:first-child {
           flex: 1 1 auto !important;
@@ -413,10 +447,10 @@
       .gh-ran-badge--platform-linux { color: #9a6700; background: #fff8c5; border-color: #d4a72c; }
       .gh-ran-badge--architecture { color: #8250df; background: #fbefff; border-color: #d8b4fe; }
       .gh-ran-badge--architecture.gh-ran-badge--preferred { color: #fff; background: #1a7f37; border-color: #116329; }
-      .gh-ran-badge--package { color: #1a7f37; background: #dafbe1; border-color: #7ee787; }
-      .gh-ran-badge--package.gh-ran-badge--package-tier-1 { color: #fff; background: #116329; border-color: #0a3622; }
-      .gh-ran-badge--package.gh-ran-badge--package-tier-2 { color: #fff; background: #2da44e; border-color: #1a7f37; }
-      .gh-ran-badge--package.gh-ran-badge--package-tier-3 { color: #2da44e; background: #f0fff4; border-color: #a7e3b1; }
+      .gh-ran-badge--package { color: var(--pkg-base-fg, #1a7f37); background: var(--pkg-base-bg, #dafbe1); border-color: var(--pkg-base-border, #7ee787); }
+      .gh-ran-badge--package.gh-ran-badge--package-tier-1 { color: var(--pkg-1-fg, #fff); background: var(--pkg-1-bg, #116329); border-color: var(--pkg-1-border, #0a3622); }
+      .gh-ran-badge--package.gh-ran-badge--package-tier-2 { color: var(--pkg-2-fg, #fff); background: var(--pkg-2-bg, #2da44e); border-color: var(--pkg-2-border, #1a7f37); }
+      .gh-ran-badge--package.gh-ran-badge--package-tier-3 { color: var(--pkg-3-fg, #2da44e); background: var(--pkg-3-bg, #f0fff4); border-color: var(--pkg-3-border, #a7e3b1); }
       .gh-ran-digest {
         position: relative;
         flex: 0 0 auto !important;
@@ -541,6 +575,30 @@
       @media (prefers-color-scheme: dark) {
         .gh-ran-mobile { border-left-color: #d4a72c; }
         .gh-ran-desktop { border-left-color: #58a6ff; }
+        .gh-ran-system-android {
+          --pkg-base-bg: #173c24; --pkg-base-fg: #7ee787; --pkg-base-border: #2ea043;
+          --pkg-1-bg: #2ea043; --pkg-1-fg: #fff; --pkg-1-border: #3fb950; --pkg-1-edge: #3fb950; --pkg-1-tint: rgb(63 185 80 / .26);
+          --pkg-2-bg: #1a7f37; --pkg-2-fg: #fff; --pkg-2-border: #2ea043; --pkg-2-edge: #1a7f37; --pkg-2-tint: rgb(26 127 55 / .16);
+          --pkg-3-bg: #0f2a18; --pkg-3-fg: #7ee787; --pkg-3-border: #1a7f37; --pkg-3-edge: #14532d; --pkg-3-tint: rgb(126 231 135 / .08);
+        }
+        .gh-ran-system-macos {
+          --pkg-base-bg: #21262d; --pkg-base-fg: #c9d1d9; --pkg-base-border: #6e7681;
+          --pkg-1-bg: #6e7681; --pkg-1-fg: #fff; --pkg-1-border: #8b949e; --pkg-1-edge: #8b949e; --pkg-1-tint: rgb(139 148 158 / .24);
+          --pkg-2-bg: #30363d; --pkg-2-fg: #e6edf3; --pkg-2-border: #484f58; --pkg-2-edge: #6e7681; --pkg-2-tint: rgb(110 118 129 / .16);
+          --pkg-3-bg: #161b22; --pkg-3-fg: #8b949e; --pkg-3-border: #30363d; --pkg-3-edge: #30363d; --pkg-3-tint: rgb(139 148 158 / .08);
+        }
+        .gh-ran-system-windows {
+          --pkg-base-bg: #0d2847; --pkg-base-fg: #79c0ff; --pkg-base-border: #1f6feb;
+          --pkg-1-bg: #1f6feb; --pkg-1-fg: #fff; --pkg-1-border: #388bfd; --pkg-1-edge: #58a6ff; --pkg-1-tint: rgb(56 139 253 / .26);
+          --pkg-2-bg: #0d419d; --pkg-2-fg: #fff; --pkg-2-border: #1f6feb; --pkg-2-edge: #1f6feb; --pkg-2-tint: rgb(31 111 235 / .18);
+          --pkg-3-bg: #0d2847; --pkg-3-fg: #79c0ff; --pkg-3-border: #1f6feb; --pkg-3-edge: #0d419d; --pkg-3-tint: rgb(121 192 255 / .10);
+        }
+        .gh-ran-system-linux {
+          --pkg-base-bg: #3d2e00; --pkg-base-fg: #e3b341; --pkg-base-border: #9e6a03;
+          --pkg-1-bg: #9e6a03; --pkg-1-fg: #fff; --pkg-1-border: #d4a72c; --pkg-1-edge: #d4a72c; --pkg-1-tint: rgb(212 167 44 / .26);
+          --pkg-2-bg: #6e4c00; --pkg-2-fg: #fff8c5; --pkg-2-border: #9e6a03; --pkg-2-edge: #9e6a03; --pkg-2-tint: rgb(158 106 3 / .18);
+          --pkg-3-bg: #3d2e00; --pkg-3-fg: #e3b341; --pkg-3-border: #9e6a03; --pkg-3-edge: #6e4c00; --pkg-3-tint: rgb(227 179 65 / .10);
+        }
         .gh-ran-badge--device-mobile { color: #fff8c5; background: #6e4c00; border-color: #9e6a03; }
         .gh-ran-badge--device-desktop { color: #f0f6fc; background: #30363d; border-color: #484f58; }
         .gh-ran-badge--platform-android { color: #7ee787; background: #173c24; border-color: #2ea043; }
@@ -557,14 +615,13 @@
         .gh-ran-file-time::before { border-color: #a371f7; box-shadow: inset 2px -1px 0 -1px #a371f7; }
         .gh-ran-badge--architecture { color: #d2a8ff; background: #2d1f4e; border-color: #8957e5; }
         .gh-ran-badge--architecture.gh-ran-badge--preferred { color: #fff; background: #238636; border-color: #2ea043; }
-        .gh-ran-preferred { background-image: linear-gradient(90deg, rgb(46 160 67 / .16), rgb(46 160 67 / 0) 45%); }
-        .gh-ran-pkg-rank-1 { border-left-color: #3fb950; background-image: linear-gradient(90deg, rgb(63 185 80 / .26), rgb(63 185 80 / 0) 50%); }
-        .gh-ran-pkg-rank-2 { border-left-color: #1a7f37; background-image: linear-gradient(90deg, rgb(26 127 55 / .16), rgb(26 127 55 / 0) 50%); }
-        .gh-ran-pkg-rank-3 { border-left-color: #14532d; background-image: linear-gradient(90deg, rgb(126 231 135 / .08), rgb(126 231 135 / 0) 50%); }
-        .gh-ran-badge--package { color: #7ee787; background: #173c24; border-color: #2ea043; }
-        .gh-ran-badge--package.gh-ran-badge--package-tier-1 { color: #fff; background: #2ea043; border-color: #3fb950; }
-        .gh-ran-badge--package.gh-ran-badge--package-tier-2 { color: #fff; background: #1a7f37; border-color: #2ea043; }
-        .gh-ran-badge--package.gh-ran-badge--package-tier-3 { color: #7ee787; background: #0f2a18; border-color: #1a7f37; }
+        .gh-ran-pkg-rank-1 { border-left-color: var(--pkg-1-edge, #3fb950); background-image: linear-gradient(90deg, var(--pkg-1-tint, rgb(63 185 80 / .26)), transparent 50%); }
+        .gh-ran-pkg-rank-2 { border-left-color: var(--pkg-2-edge, #1a7f37); background-image: linear-gradient(90deg, var(--pkg-2-tint, rgb(26 127 55 / .16)), transparent 50%); }
+        .gh-ran-pkg-rank-3 { border-left-color: var(--pkg-3-edge, #14532d); background-image: linear-gradient(90deg, var(--pkg-3-tint, rgb(126 231 135 / .08)), transparent 50%); }
+        .gh-ran-badge--package { color: var(--pkg-base-fg, #7ee787); background: var(--pkg-base-bg, #173c24); border-color: var(--pkg-base-border, #2ea043); }
+        .gh-ran-badge--package.gh-ran-badge--package-tier-1 { color: var(--pkg-1-fg, #fff); background: var(--pkg-1-bg, #2ea043); border-color: var(--pkg-1-border, #3fb950); }
+        .gh-ran-badge--package.gh-ran-badge--package-tier-2 { color: var(--pkg-2-fg, #fff); background: var(--pkg-2-bg, #1a7f37); border-color: var(--pkg-2-border, #2ea043); }
+        .gh-ran-badge--package.gh-ran-badge--package-tier-3 { color: var(--pkg-3-fg, #7ee787); background: var(--pkg-3-bg, #0f2a18); border-color: var(--pkg-3-border, #1a7f37); }
       }
     `;
     document.head.append(style);
