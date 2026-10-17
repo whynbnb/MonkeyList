@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.72.0
-// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories can each carry a per-user note that is marked with a small dot on the label and revealed on hover, override all other row/post effects, and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default) and can highlight the matched keyword inside the topic title. An advanced master switch can temporarily suspend every page effect without touching saved data.
+// @version      0.73.0
+// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories can each carry a group note (plus an optional per-user note) that is marked with a small dot on the label and revealed in a styled tooltip on hover, override all other row/post effects, and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default) and can highlight the matched keyword inside the topic title. An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
 // @run-at       document-idle
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.72.0';
+  const SCRIPT_VERSION = '0.73.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -96,7 +96,7 @@
     const effectIds = libraryEffectIds(raw.effectIds);
     const color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw.color || '') ? raw.color : '';
     const priority = Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 10000;
-    return { id, label, effectIds, color, priority, hint };
+    return { id, label, effectIds, color, priority, hint, note: String(raw.note || '').trim() };
   }
 
   function loadCats() {
@@ -395,6 +395,7 @@
       color: src.color,
       priority: src.priority,
       hint: src.hint,
+      note: src.note || '',
       effectIds: [...(src.effectIds || [])],
     });
     if (!cat) return;
@@ -759,9 +760,12 @@
       const binding = mark.groups.find((item) => item.id === id) || { reason: '' };
       if (group) {
         const reason = String(binding.reason || '').trim();
+        const groupNote = String(group.note || '').trim();
+        // Group-level note first, then the per-user reason (if both exist).
+        const noteText = [groupNote, reason].filter(Boolean).join('\n');
         // With a note we render our own tooltip, so suppress the native title to
         // avoid two overlapping tooltips; without one keep the label as the title.
-        wanted.push({ kind: 'group-tag', id: group.id, label: group.label, title: reason ? '' : group.label, note: reason, color: group.color || '#0969da', hasNote: !!reason });
+        wanted.push({ kind: 'group-tag', id: group.id, label: group.label, title: noteText ? '' : group.label, note: noteText, color: group.color || '#0969da', hasNote: !!noteText });
       }
     });
     [...host.children].forEach((el) => {
@@ -1091,7 +1095,7 @@
         <div class="ld-tle-panel__builtin"></div>
       </section>
       <section class="ld-tle-panel__pane" data-pane="groups">
-        <div class="ld-tle-panel__section-head"><div><strong>分组</strong><span>分组只负责组织用户，可叠加多个效果；每个用户的每个分组可单独写备注</span></div></div>
+        <div class="ld-tle-panel__section-head"><div><strong>分组</strong><span>分组只负责组织用户，可叠加多个效果；每个分组可写备注，论坛悬浮标签时显示</span></div></div>
         <div class="ld-tle-panel__cats"></div>
         <div class="ld-tle-panel__cat-add ld-tle-panel__card">
           <input type="text" class="ld-tle-panel__cat-label" placeholder="新分组名">
@@ -1280,6 +1284,7 @@
     if (patch.effectIds) group.effectIds = libraryEffectIds(patch.effectIds).filter((effectId) => getEffect(effectId));
     if (patch.color && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(patch.color)) group.color = patch.color;
     if (patch.priority != null && Number.isFinite(Number(patch.priority))) group.priority = Number(patch.priority);
+    if (patch.note != null) group.note = String(patch.note).trim();
     saveCats();
     fillCatSelects();
     renderCats();
@@ -1506,6 +1511,12 @@
        label.type = 'text';
        label.className = 'ld-tle-panel__cat-label-input';
        label.value = c.label;
+       const note = document.createElement('input');
+       note.type = 'text';
+       note.className = 'ld-tle-panel__cat-note-input';
+       note.placeholder = '备注（可选，论坛悬浮标签时显示）';
+       note.value = c.note || '';
+       note.title = '分组备注';
        const effect = document.createElement('div');
        effect.className = 'ld-tle-panel__effect-choices';
        effects.filter((item) => EFFECT_LIBRARY_IDS.has(item.id)).forEach((item) => {
@@ -1547,6 +1558,7 @@
         del.className = 'ld-tle-panel__cat-delete';
        del.textContent = '删';
        label.addEventListener('change', () => updateGroup(c.id, { label: label.value }));
+       note.addEventListener('change', () => updateGroup(c.id, { note: note.value }));
         effect.addEventListener('change', () => updateGroup(c.id, { effectIds: [...effect.querySelectorAll('input:checked')].map((option) => option.value) }));
         color.addEventListener('change', () => updateGroup(c.id, { color: color.value }));
         priority.addEventListener('change', () => updateGroup(c.id, { priority: priority.value }));
@@ -1554,7 +1566,7 @@
         down.addEventListener('click', () => moveCategory(c.id, 1));
         dup.addEventListener('click', () => duplicateCategory(c.id));
        del.addEventListener('click', () => removeCategory(c.id));
-        row.append(label, effect, color, priority, up, down, dup, del);
+        row.append(label, note, effect, color, priority, up, down, dup, del);
       box.append(row);
     });
   }
@@ -1624,8 +1636,9 @@
          tagButton.className = 'ld-tle-panel__row-tag is-on ld-tle-panel__row-group-tag';
          tagButton.textContent = group.label;
          const reason = String(binding.reason || '').trim();
-         tagButton.title = reason || '点击编辑绑定原因';
-         if (reason) tagButton.dataset.ldTleNote = '1';
+         const noteText = [String(group.note || '').trim(), reason].filter(Boolean).join('\n');
+         tagButton.title = noteText || '点击编辑绑定原因';
+         if (noteText) tagButton.dataset.ldTleNote = '1';
          tagButton.addEventListener('click', () => {
            const value = window.prompt(`编辑「${group.label}」的绑定原因`, binding.reason || '');
            if (value == null) return;
@@ -2322,7 +2335,7 @@
         background: #fff;
         box-shadow: 0 3px 12px rgba(31, 35, 40, .18);
         font: 500 12px/17px ui-sans-serif, system-ui, sans-serif;
-        white-space: normal;
+        white-space: pre-line;
         overflow-wrap: anywhere;
         text-align: left;
         opacity: 0;
@@ -2513,7 +2526,7 @@
       .ld-tle-panel__effect-choices label { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; box-sizing: border-box; padding: 0 8px; border: 1px solid #d0d7de; border-radius: 6px; background: #f8fafc; cursor: pointer; }
       .ld-tle-panel__effect-choices label:has(input:checked) { border-color: #0969da; background: #eaf3ff; color: #0969da; }
       .ld-tle-panel__cat-effect, .ld-tle-panel__keyword-cat { min-height: 34px; }
-        .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 30px 30px 30px 38px; grid-template-rows: auto auto; gap: 7px; align-items: center; padding: 7px 0; }
+        .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 30px 30px 30px 38px; grid-template-rows: auto auto auto; gap: 7px; align-items: center; padding: 7px 0; }
         .ld-tle-panel__cat > .ld-tle-panel__cat-label-input { grid-column: 1; grid-row: 1; min-width: 0; }
         .ld-tle-panel__cat > .ld-tle-panel__cat-color-input { grid-column: 2; grid-row: 1; width: 32px; height: 28px; padding: 0; border: 0; background: transparent; }
         .ld-tle-panel__cat > .ld-tle-panel__cat-priority-input { grid-column: 3; grid-row: 1; }
@@ -2521,7 +2534,8 @@
         .ld-tle-panel__cat > .ld-tle-panel__cat-down { grid-column: 5; grid-row: 1; }
         .ld-tle-panel__cat > .ld-tle-panel__cat-copy { grid-column: 6; grid-row: 1; }
         .ld-tle-panel__cat > .ld-tle-panel__cat-delete { grid-column: 7; grid-row: 1; }
-       .ld-tle-panel__cat > .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; width: 100%; }
+        .ld-tle-panel__cat > .ld-tle-panel__cat-note-input { grid-column: 1 / -1; grid-row: 2; width: 100%; min-width: 0; box-sizing: border-box; }
+       .ld-tle-panel__cat > .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 3; width: 100%; }
       .ld-tle-panel__cat input[type="number"], .ld-tle-panel__builtin-row input[type="number"], .ld-tle-panel__keyword-row input[type="number"] { width: 68px; box-sizing: border-box; }
       .ld-tle-panel__cat input[type="color"] { width: 32px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
       .ld-tle-panel__effect-row input[type="color"] { width: 30px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
@@ -2598,7 +2612,7 @@
           .ld-tle-panel__row-tags { grid-column: 1 / -1; width: 100%; }
           .ld-tle-panel__row-tags { grid-row: 2; }
           .ld-tle-panel__cat { grid-template-columns: minmax(0, 1fr) 32px 68px 30px 30px 30px 38px; gap: 4px; }
-         .ld-tle-panel__cat .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
+         .ld-tle-panel__cat .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 3; }
           .ld-tle-panel__keyword-row { grid-template-columns: minmax(0, 1fr) 34px 32px 68px 28px 30px 30px 30px 38px; gap: 4px; }
       }
       @media (prefers-color-scheme: dark) {
