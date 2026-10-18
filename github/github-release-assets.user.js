@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.7.0
+// @version      0.7.1
 // @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64), ranking package formats with per-platform colors (Linux: AppImage > deb > rpm; Windows: portable > zip > setup), labelling each platform group once, and offering an eye toggle in the Assets header to temporarily disable the styling while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
@@ -29,6 +29,9 @@
   const ATTESTATION_TEXT = /^release attestation \(json\)$/i;
   const METADATA_FILE = /(?:\.blockmap|\.(?:asc|sig|gpg|json|yml|yaml|txt))$/i;
   const CHECKSUM_SUFFIX = /\.(?:sha(?:1|224|256|384|512)?(?:sum)?|md5)$/i;
+  // Checksum manifests such as SHA256SUMS, SHA512SUMS.txt, checksums.txt or
+  // MD5SUMS. Anchored so normal release assets are not pulled in.
+  const CHECKSUM_FILE = /^(?:sha(?:1|224|256|384|512)?(?:sums?|checksums?)|md5sums?|checksums?)(?:\.(?:txt|asc|sig|gpg|sha(?:1|224|256|384|512)?|md5))*$/i;
   const SMALL_METADATA_SIZE = 2 * 1024 * 1024;
   const PLATFORM = [
     ['mobile', 'Android', /(?:^|[-_.])android(?:$|[-_.])|\.(?:apk|aab)$/i],
@@ -124,7 +127,8 @@
   }
 
   function isChecksum(name, row) {
-    return CHECKSUM_SUFFIX.test(name) && (getFileSize(row) ?? 0) <= SMALL_METADATA_SIZE;
+    return (CHECKSUM_SUFFIX.test(name) || CHECKSUM_FILE.test(name))
+      && (getFileSize(row) ?? 0) <= SMALL_METADATA_SIZE;
   }
 
   function processAsset(link) {
@@ -141,7 +145,12 @@
     if (METADATA_FILE.test(name) || checksum) {
       row.classList.add('gh-ran-muted');
       link.classList.add('gh-ran-link-muted');
-      if (checksum) row.dataset.ghRanChecksum = name.replace(CHECKSUM_SUFFIX, '');
+      if (checksum) {
+        const target = name.replace(CHECKSUM_SUFFIX, '');
+        // Manifest files (SHA256SUMS, checksums.txt, ...) cover every asset and
+        // have no single target to group with.
+        if (target !== name) row.dataset.ghRanChecksum = target;
+      }
       return;
     }
 
