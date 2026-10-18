@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.6.2
+// @version      0.6.3
 // @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64), ranking package formats with per-platform color steps (Linux: AppImage > deb > rpm; Windows: portable > zip > setup), and labelling each platform group once while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
@@ -138,7 +138,7 @@
     const architecture = firstMatch(name, ARCHITECTURE);
     const packageInfo = getPackageInfo(name, platform?.[1]);
     const badges = document.createElement('span');
-    badges.className = 'gh-ran-badges';
+    badges.className = 'gh-ran-badges gh-ran-badges--trail';
 
     if (platform) {
       const [device, system] = platform;
@@ -163,7 +163,12 @@
       if (packageInfo.tier) badge.dataset.ghRanPkgTier = String(packageInfo.tier);
       badges.append(badge);
     }
-    if (badges.childElementCount) link.insertAdjacentElement('afterend', badges);
+    if (badges.childElementCount) {
+      link.insertAdjacentElement('afterend', badges);
+      if (link.parentElement && link.parentElement !== row) {
+        link.parentElement.classList.add('gh-ran-asset__namebox');
+      }
+    }
     if (platform || badges.childElementCount) row.classList.add('gh-ran-asset');
   }
 
@@ -472,6 +477,32 @@
           max-width: none !important;
           margin-left: auto !important;
         }
+        /* Keep the trailing badges in two fixed columns so architecture and
+           package lineup vertically across rows instead of following the
+           filename length. */
+        .gh-ran-asset__namebox {
+          display: flex;
+          flex: 1 1 auto;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+        }
+        .gh-ran-asset__namebox > a {
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+        .gh-ran-asset__namebox > .gh-ran-badges--trail {
+          display: grid;
+          grid-template-columns: 96px 132px;
+          flex: 0 0 232px;
+          gap: 4px;
+          align-items: center;
+          justify-items: start;
+          margin-left: auto;
+          margin-right: 0;
+        }
+        .gh-ran-asset__namebox .gh-ran-badge--architecture { grid-column: 1; }
+        .gh-ran-asset__namebox .gh-ran-badge--package { grid-column: 2; }
       }
       .gh-ran-badges {
         display: inline-flex;
