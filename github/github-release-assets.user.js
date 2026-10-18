@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.6.7
-// @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64), ranking package formats with per-platform color steps (Linux: AppImage > deb > rpm; Windows: portable > zip > setup), and labelling each platform group once while de-emphasizing metadata and source archives.
+// @version      0.7.0
+// @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64), ranking package formats with per-platform colors (Linux: AppImage > deb > rpm; Windows: portable > zip > setup), labelling each platform group once, and offering an eye toggle in the Assets header to temporarily disable the styling while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
 // @run-at       document-idle
@@ -14,6 +14,16 @@
   const STYLE_ID = 'gh-release-asset-navigator-style';
   const PROCESSED = 'data-gh-ran-processed';
   const ASSETS_ID = 'gh-ran-assets';
+  const TOGGLE_ID = 'gh-ran-toggle';
+  const TOGGLE_STYLE_ID = 'gh-ran-toggle-style';
+  const ENABLED_KEY = 'gh-ran-enabled';
+  const checksumOrigins = new WeakMap();
+  let enabled = true;
+  try {
+    enabled = localStorage.getItem(ENABLED_KEY) !== 'false';
+  } catch (error) {
+    enabled = true;
+  }
   const SOURCE_CODE_TEXT = /^source code \((?:zip|tar\.gz)\)$/i;
   const SOURCE_CODE_URL = /\/archive\/refs\/(?:tags|heads)\/[^?#]+\.(?:zip|tar\.gz)(?:[?#]|$)/i;
   const ATTESTATION_TEXT = /^release attestation \(json\)$/i;
@@ -332,8 +342,28 @@
       const assetRow = assetLink && getAssetRow(assetLink);
       if (!assetRow || assetRow === checksumRow) return;
 
+      if (!checksumOrigins.has(checksumRow)) {
+        checksumOrigins.set(checksumRow, {
+          parent: checksumRow.parentElement,
+          next: checksumRow.nextElementSibling,
+        });
+      }
       assetRow.insertAdjacentElement('afterend', checksumRow);
       checksumRow.dataset.ghRanGrouped = 'true';
+    });
+  }
+
+  function restoreChecksums() {
+    document.querySelectorAll('[data-gh-ran-checksum]').forEach((checksumRow) => {
+      if (checksumRow.dataset.ghRanGrouped !== 'true') return;
+      delete checksumRow.dataset.ghRanGrouped;
+      const origin = checksumOrigins.get(checksumRow);
+      if (!origin || !origin.parent || !origin.parent.isConnected) return;
+      if (origin.next && origin.next.parentElement === origin.parent) {
+        origin.parent.insertBefore(checksumRow, origin.next);
+      } else {
+        origin.parent.append(checksumRow);
+      }
     });
   }
 
@@ -380,11 +410,107 @@
     return 'large';
   }
 
+  function findAssetsSummary() {
+    return [...document.querySelectorAll('details > summary')]
+      .find((summary) => summary.textContent.replace(/\s+/g, ' ').trim().startsWith('Assets'));
+  }
+
+  function applyEnabled() {
+    const mainStyle = document.getElementById(STYLE_ID);
+    if (mainStyle) mainStyle.disabled = !enabled;
+    document.documentElement.classList.toggle('gh-ran-off', !enabled);
+    const button = document.getElementById(TOGGLE_ID);
+    if (button) {
+      button.classList.toggle('is-off', !enabled);
+      button.setAttribute('aria-pressed', String(enabled));
+      button.title = enabled ? 'Hide asset styling' : 'Show asset styling';
+      button.setAttribute('aria-label', button.title);
+    }
+  }
+
+  function addToggle() {
+    const summary = findAssetsSummary();
+    if (summary) {
+      let button = document.getElementById(TOGGLE_ID);
+      if (!button) {
+        button = document.createElement('button');
+        button.id = TOGGLE_ID;
+        button.type = 'button';
+        button.className = 'gh-ran-toggle';
+        button.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 2c1.981 0 3.671.992 4.933 2.078 1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.45.678-1.367 1.932-2.637 3.023C11.67 13.008 9.981 14 8 14c-1.981 0-3.671-.992-4.933-2.078C1.797 10.831.88 9.577.43 8.899a1.62 1.62 0 0 1 0-1.798c.45-.678 1.367-1.932 2.637-3.023C4.33 2.992 6.019 2 8 2ZM1.679 7.932a.12.12 0 0 0 0 .136c.411.622 1.241 1.75 2.366 2.717C5.176 11.758 6.527 12.5 8 12.5c1.473 0 2.825-.742 3.955-1.715 1.124-.967 1.954-2.096 2.366-2.717a.12.12 0 0 0 0-.136c-.412-.621-1.242-1.75-2.366-2.717C10.824 4.242 9.473 3.5 8 3.5c-1.473 0-2.825.742-3.955 1.715-1.124.967-1.954 2.096-2.366 2.717ZM8 10a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 10Z"/></svg>';
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          enabled = !enabled;
+          try {
+            localStorage.setItem(ENABLED_KEY, String(enabled));
+          } catch (error) {
+            // Ignore storage failures (private mode, etc.).
+          }
+          applyEnabled();
+          if (enabled) scheduleProcessing();
+          else restoreChecksums();
+        });
+        summary.append(button);
+      }
+    }
+    applyEnabled();
+  }
+
+  function addToggleStyles() {
+    if (document.getElementById(TOGGLE_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = TOGGLE_STYLE_ID;
+    style.textContent = `
+      .gh-ran-toggle {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        margin-left: 8px;
+        padding: 0;
+        border: 1px solid var(--borderColor-default, #d0d7de);
+        border-radius: 6px;
+        color: var(--fgColor-muted, #57606a);
+        background: var(--bgColor-default, #ffffff);
+        cursor: pointer;
+        vertical-align: middle;
+        line-height: 1;
+      }
+      .gh-ran-toggle:hover {
+        color: var(--fgColor-default, #1f2328);
+        background: var(--bgColor-muted, #f6f8fa);
+      }
+      .gh-ran-toggle:focus-visible {
+        outline: 2px solid var(--focus-outlineColor, #0969da);
+        outline-offset: 2px;
+      }
+      .gh-ran-toggle svg { display: block; width: 16px; height: 16px; }
+      .gh-ran-toggle.is-off { opacity: .6; }
+      .gh-ran-toggle.is-off::after {
+        content: '';
+        position: absolute;
+        left: 5px;
+        right: 5px;
+        top: 50%;
+        height: 1.5px;
+        border-radius: 1px;
+        background: currentColor;
+        transform: rotate(-45deg);
+      }
+      html.gh-ran-off .gh-ran-badges,
+      html.gh-ran-off .gh-ran-group-header,
+      html.gh-ran-off #gh-ran-assets-jump { display: none !important; }
+    `;
+    document.head.append(style);
+  }
+
   function addAssetsJump() {
     if (!/^\/[^/]+\/[^/]+\/releases\/tag\//.test(location.pathname)) return;
 
-    const assetsSummary = [...document.querySelectorAll('details > summary')]
-      .find((summary) => summary.textContent.replace(/\s+/g, ' ').trim().startsWith('Assets'));
+    const assetsSummary = findAssetsSummary();
     const assetsSection = assetsSummary?.closest('details-toggle, .tmp-mb-3');
     const breadcrumb = document.querySelector('nav[aria-label="Breadcrumb"]');
     if (!assetsSection || !breadcrumb || document.getElementById('gh-ran-assets-jump')) return;
@@ -405,11 +531,14 @@
 
   function processPage() {
     addStyles();
+    addToggleStyles();
+    addToggle();
     findAssetRows().forEach(processAsset);
     rankPackages();
     markBestItems();
     markPlatformGroups();
-    groupChecksums();
+    if (enabled) groupChecksums();
+    else restoreChecksums();
     processSourceCode();
     processAttestations();
     visualizeAssetDetails();
