@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.6.0
+// @version      0.6.1
 // @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64), ranking package formats with per-platform color steps (Linux: AppImage > deb > rpm; Windows: portable > zip > setup), and separating platform groups while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
@@ -137,13 +137,17 @@
     const platform = findPlatform(name);
     const architecture = firstMatch(name, ARCHITECTURE);
     const packageInfo = getPackageInfo(name, platform?.[1]);
+    const leadBadges = document.createElement('span');
+    leadBadges.className = 'gh-ran-badges gh-ran-badges--lead';
     const badges = document.createElement('span');
     badges.className = 'gh-ran-badges';
 
     if (platform) {
       const [device, system] = platform;
-      badges.append(createBadge(device === 'mobile' ? 'MOBILE' : 'DESKTOP', `device-${device}`));
-      badges.append(createBadge(system, `platform-${system.toLowerCase()}`));
+      // Device + platform are group-level information, so they sit before the
+      // filename and read as a row prefix.
+      leadBadges.append(createBadge(system, `platform-${system.toLowerCase()}`));
+      leadBadges.append(createBadge(device === 'mobile' ? 'MOBILE' : 'DESKTOP', `device-${device}`));
       row.classList.add(`gh-ran-${device}`);
       row.classList.add(`gh-ran-system-${system.toLowerCase()}`);
       row.dataset.ghRanSystem = system;
@@ -165,8 +169,9 @@
       if (packageInfo.tier) badge.dataset.ghRanPkgTier = String(packageInfo.tier);
       badges.append(badge);
     }
-    if (badges.childElementCount) {
-      link.insertAdjacentElement('afterend', badges);
+    if (leadBadges.childElementCount) link.insertAdjacentElement('beforebegin', leadBadges);
+    if (leadBadges.childElementCount || badges.childElementCount) {
+      if (badges.childElementCount) link.insertAdjacentElement('afterend', badges);
       row.classList.add('gh-ran-asset');
     }
   }
@@ -426,6 +431,10 @@
         gap: 4px;
         margin: 0 8px;
         vertical-align: middle;
+      }
+      .gh-ran-badges--lead {
+        margin-left: 0;
+        margin-right: 10px;
       }
       .gh-ran-badge {
         display: inline-flex;
