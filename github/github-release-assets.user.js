@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.6.1
-// @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64), ranking package formats with per-platform color steps (Linux: AppImage > deb > rpm; Windows: portable > zip > setup), and separating platform groups while de-emphasizing metadata and source archives.
+// @version      0.6.2
+// @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64), ranking package formats with per-platform color steps (Linux: AppImage > deb > rpm; Windows: portable > zip > setup), and labelling each platform group once while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
 // @run-at       document-idle
@@ -137,17 +137,11 @@
     const platform = findPlatform(name);
     const architecture = firstMatch(name, ARCHITECTURE);
     const packageInfo = getPackageInfo(name, platform?.[1]);
-    const leadBadges = document.createElement('span');
-    leadBadges.className = 'gh-ran-badges gh-ran-badges--lead';
     const badges = document.createElement('span');
     badges.className = 'gh-ran-badges';
 
     if (platform) {
       const [device, system] = platform;
-      // Device + platform are group-level information, so they sit before the
-      // filename and read as a row prefix.
-      leadBadges.append(createBadge(system, `platform-${system.toLowerCase()}`));
-      leadBadges.append(createBadge(device === 'mobile' ? 'MOBILE' : 'DESKTOP', `device-${device}`));
       row.classList.add(`gh-ran-${device}`);
       row.classList.add(`gh-ran-system-${system.toLowerCase()}`);
       row.dataset.ghRanSystem = system;
@@ -169,11 +163,8 @@
       if (packageInfo.tier) badge.dataset.ghRanPkgTier = String(packageInfo.tier);
       badges.append(badge);
     }
-    if (leadBadges.childElementCount) link.insertAdjacentElement('beforebegin', leadBadges);
-    if (leadBadges.childElementCount || badges.childElementCount) {
-      if (badges.childElementCount) link.insertAdjacentElement('afterend', badges);
-      row.classList.add('gh-ran-asset');
-    }
+    if (badges.childElementCount) link.insertAdjacentElement('afterend', badges);
+    if (platform || badges.childElementCount) row.classList.add('gh-ran-asset');
   }
 
   function rankPackages() {
@@ -202,12 +193,13 @@
         );
         row.classList.remove('gh-ran-pkg-rank-1', 'gh-ran-pkg-rank-2', 'gh-ran-pkg-rank-3');
         if (!ranked) {
-          badge.textContent = label;
+          if (badge.textContent !== label) badge.textContent = label;
           badge.removeAttribute('title');
           return;
         }
         const rank = tiers.indexOf(tier) + 1;
-        badge.textContent = `#${rank} ${label}`;
+        const text = `#${rank} ${label}`;
+        if (badge.textContent !== text) badge.textContent = text;
         badge.classList.add(`gh-ran-badge--package-tier-${rank}`);
         row.classList.add(`gh-ran-pkg-rank-${rank}`);
         const system = row.dataset.ghRanSystem || 'this platform';
@@ -218,13 +210,59 @@
   }
 
   function markPlatformGroups() {
+    const desired = new Map();
     let previous = '';
     document.querySelectorAll('.gh-ran-asset').forEach((row) => {
       const system = row.dataset.ghRanSystem || '';
-      // Add a gap + divider whenever the platform changes, so Android, macOS,
-      // Windows and Linux read as separate sections instead of one long list.
-      row.classList.toggle('gh-ran-group-start', !!system && !!previous && system !== previous);
-      if (system) previous = system;
+      if (!system) return;
+      if (system !== previous) {
+        desired.set(row, {
+          system,
+          device: row.classList.contains('gh-ran-mobile') ? 'mobile' : 'desktop',
+        });
+      }
+      previous = system;
+    });
+
+    // Drop headers that are no longer right before their group's first row.
+    document.querySelectorAll('.gh-ran-group-header').forEach((header) => {
+      const next = header.nextElementSibling;
+      const info = next && desired.get(next);
+      if (
+        !info ||
+        header.dataset.ghRanHeaderFor !== info.system ||
+        header.dataset.ghRanHeaderDevice !== info.device
+      ) {
+        header.remove();
+      }
+    });
+
+    // One header per platform group, written only once.
+    let index = 0;
+    desired.forEach((info, row) => {
+      let header = row.previousElementSibling;
+      if (
+        !header ||
+        !header.classList.contains('gh-ran-group-header') ||
+        header.dataset.ghRanHeaderFor !== info.system ||
+        header.dataset.ghRanHeaderDevice !== info.device
+      ) {
+        header = document.createElement(row.tagName === 'LI' ? 'li' : 'div');
+        header.className = 'gh-ran-group-header';
+        header.dataset.ghRanHeaderFor = info.system;
+        header.dataset.ghRanHeaderDevice = info.device;
+        const badges = document.createElement('span');
+        badges.className = 'gh-ran-badges gh-ran-badges--lead';
+        badges.append(createBadge(info.system, `platform-${info.system.toLowerCase()}`));
+        badges.append(createBadge(info.device === 'mobile' ? 'MOBILE' : 'DESKTOP', `device-${info.device}`));
+        header.append(badges);
+        row.parentElement?.insertBefore(header, row);
+      }
+      const separated = index > 0;
+      if (header.classList.contains('gh-ran-group-header--sep') !== separated) {
+        header.classList.toggle('gh-ran-group-header--sep', separated);
+      }
+      index++;
     });
   }
 
@@ -411,7 +449,17 @@
       .gh-ran-pkg-rank-1 { border-left-color: var(--pkg-1-edge, #116329); background-image: linear-gradient(90deg, var(--pkg-1-tint, rgb(17 99 41 / .18)), transparent 50%); }
       .gh-ran-pkg-rank-2 { border-left-color: var(--pkg-2-edge, #2da44e); background-image: linear-gradient(90deg, var(--pkg-2-tint, rgb(45 164 78 / .12)), transparent 50%); }
       .gh-ran-pkg-rank-3 { border-left-color: var(--pkg-3-edge, #7ee787); background-image: linear-gradient(90deg, var(--pkg-3-tint, rgb(126 231 135 / .06)), transparent 50%); }
-      .gh-ran-group-start { margin-top: 12px; border-top: 1px solid var(--borderColor-muted, #d8dee4); }
+      .gh-ran-group-header {
+        display: flex;
+        align-items: center;
+        padding: 8px 14px 4px;
+        list-style: none;
+        border-bottom: 0;
+      }
+      .gh-ran-group-header--sep {
+        margin-top: 8px;
+        border-top: 1px solid var(--borderColor-muted, #d8dee4);
+      }
       @media (min-width: 768px) {
         .gh-ran-asset > div:first-child {
           flex: 1 1 auto !important;
@@ -584,6 +632,7 @@
       @media (prefers-color-scheme: dark) {
         .gh-ran-mobile { border-left-color: #d4a72c; }
         .gh-ran-desktop { border-left-color: #58a6ff; }
+        .gh-ran-group-header--sep { border-top-color: var(--borderColor-muted, #30363d); }
         .gh-ran-system-android {
           --pkg-base-bg: #173c24; --pkg-base-fg: #7ee787; --pkg-base-border: #2ea043;
           --pkg-1-bg: #2ea043; --pkg-1-fg: #fff; --pkg-1-border: #3fb950; --pkg-1-edge: #3fb950; --pkg-1-tint: rgb(63 185 80 / .26);
