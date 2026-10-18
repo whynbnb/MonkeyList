@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.6.6
+// @version      0.6.7
 // @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64), ranking package formats with per-platform color steps (Linux: AppImage > deb > rpm; Windows: portable > zip > setup), and labelling each platform group once while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
@@ -38,6 +38,7 @@
   // "recommended" highlight so the right download is obvious at a glance.
   const PREFERRED_ARCH = {
     Android: 'ARM64',
+    iOS: 'ARM64',
     macOS: 'ARM64',
     Windows: 'x64',
     Linux: 'x64',
@@ -200,11 +201,40 @@
         const rank = tiers.indexOf(tier) + 1;
         const text = `#${rank} ${label}`;
         if (badge.textContent !== text) badge.textContent = text;
-        badge.classList.add(`gh-ran-badge--package-tier-${rank}`);
-        row.classList.add(`gh-ran-pkg-rank-${rank}`);
+        // Only the best format in each group is highlighted; the rest keep the
+        // neutral platform colour.
+        if (rank === 1) {
+          badge.classList.add('gh-ran-badge--package-tier-1');
+          row.classList.add('gh-ran-pkg-rank-1');
+        }
         const system = row.dataset.ghRanSystem || 'this platform';
         const hint = rank === 1 ? 'Best' : rank === 2 ? 'Alternative' : 'Least preferred';
         badge.title = `${hint} package format for ${system}`;
+      });
+    });
+  }
+
+  function markBestItems() {
+    const groups = new Map();
+    document.querySelectorAll('.gh-ran-asset').forEach((row) => {
+      const system = row.dataset.ghRanSystem || '';
+      const arch = row.dataset.ghRanArch || '';
+      if (!system || !arch) return;
+      const key = `${system}|${arch}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    });
+
+    groups.forEach((rows) => {
+      // A ranked group already highlights its #1 package. When a group has only
+      // one format (Android APK, macOS DMG, ...), highlight the preferred
+      // architecture instead so the best download is still obvious.
+      const ranked = rows.some((row) => row.classList.contains('gh-ran-pkg-rank-1'));
+      const system = rows[0].dataset.ghRanSystem || '';
+      const preferredArch = PREFERRED_ARCH[system];
+      rows.forEach((row) => {
+        const best = !ranked && !!preferredArch && row.dataset.ghRanArch === preferredArch;
+        row.classList.toggle('gh-ran-best', best);
       });
     });
   }
@@ -377,6 +407,7 @@
     addStyles();
     findAssetRows().forEach(processAsset);
     rankPackages();
+    markBestItems();
     markPlatformGroups();
     groupChecksums();
     processSourceCode();
@@ -417,44 +448,39 @@
       .gh-ran-asset {
         position: relative;
         border-left: 4px solid transparent;
+        border-left-color: var(--group-edge, transparent);
       }
-      /* Each platform owns one hue; package tiers are intensity steps of it. */
+      /* Each platform owns one highlight hue. */
       .gh-ran-system-android {
-        --pkg-base-bg: #dafbe1; --pkg-base-fg: #1a7f37; --pkg-base-border: #7ee787;
+        --group-edge: #7ee787;
         --pkg-1-bg: #116329; --pkg-1-fg: #fff; --pkg-1-border: #0a3622; --pkg-1-edge: #116329; --pkg-1-tint: rgb(17 99 41 / .18);
-        --pkg-2-bg: #2da44e; --pkg-2-fg: #fff; --pkg-2-border: #1a7f37; --pkg-2-edge: #2da44e; --pkg-2-tint: rgb(45 164 78 / .12);
-        --pkg-3-bg: #f0fff4; --pkg-3-fg: #2da44e; --pkg-3-border: #a7e3b1; --pkg-3-edge: #7ee787; --pkg-3-tint: rgb(126 231 135 / .06);
+      }
+      .gh-ran-system-ios {
+        --group-edge: #d8b4fe;
+        --pkg-1-bg: #8250df; --pkg-1-fg: #fff; --pkg-1-border: #6639ba; --pkg-1-edge: #8250df; --pkg-1-tint: rgb(130 80 223 / .16);
       }
       .gh-ran-system-macos {
-        --pkg-base-bg: #f6f8fa; --pkg-base-fg: #57606a; --pkg-base-border: #8c959f;
+        --group-edge: #8c959f;
         --pkg-1-bg: #24292f; --pkg-1-fg: #fff; --pkg-1-border: #1b1f24; --pkg-1-edge: #424a53; --pkg-1-tint: rgb(66 74 83 / .16);
-        --pkg-2-bg: #57606a; --pkg-2-fg: #fff; --pkg-2-border: #424a53; --pkg-2-edge: #6e7681; --pkg-2-tint: rgb(87 96 106 / .12);
-        --pkg-3-bg: #f6f8fa; --pkg-3-fg: #57606a; --pkg-3-border: #d8dee4; --pkg-3-edge: #d0d7de; --pkg-3-tint: rgb(140 149 159 / .06);
       }
       .gh-ran-system-windows {
-        --pkg-base-bg: #ddf4ff; --pkg-base-fg: #0969da; --pkg-base-border: #54aeff;
+        --group-edge: #54aeff;
         --pkg-1-bg: #0550ae; --pkg-1-fg: #fff; --pkg-1-border: #033d8b; --pkg-1-edge: #0550ae; --pkg-1-tint: rgb(5 80 174 / .16);
-        --pkg-2-bg: #0969da; --pkg-2-fg: #fff; --pkg-2-border: #0550ae; --pkg-2-edge: #0969da; --pkg-2-tint: rgb(9 105 218 / .12);
-        --pkg-3-bg: #ddf4ff; --pkg-3-fg: #0969da; --pkg-3-border: #54aeff; --pkg-3-edge: #54aeff; --pkg-3-tint: rgb(84 174 255 / .07);
       }
       .gh-ran-system-linux {
-        --pkg-base-bg: #fff8c5; --pkg-base-fg: #9a6700; --pkg-base-border: #d4a72c;
+        --group-edge: #d4a72c;
         --pkg-1-bg: #7d4e00; --pkg-1-fg: #fff; --pkg-1-border: #5c3a00; --pkg-1-edge: #9a6700; --pkg-1-tint: rgb(154 103 0 / .16);
-        --pkg-2-bg: #bf8700; --pkg-2-fg: #fff; --pkg-2-border: #9a6700; --pkg-2-edge: #bf8700; --pkg-2-tint: rgb(191 135 0 / .12);
-        --pkg-3-bg: #fff8c5; --pkg-3-fg: #9a6700; --pkg-3-border: #d4a72c; --pkg-3-edge: #eac54f; --pkg-3-tint: rgb(212 167 44 / .07);
       }
-      .gh-ran-mobile { border-left-color: #bf8700; }
-      .gh-ran-desktop { border-left-color: #0969da; }
-      /* Package preference: ranks reuse the platform hue at three intensities. */
-      .gh-ran-pkg-rank-1 { border-left-color: var(--pkg-1-edge, #116329); background-image: linear-gradient(90deg, var(--pkg-1-tint, rgb(17 99 41 / .18)), transparent 50%); }
-      .gh-ran-pkg-rank-2 { border-left-color: var(--pkg-2-edge, #2da44e); background-image: linear-gradient(90deg, var(--pkg-2-tint, rgb(45 164 78 / .12)), transparent 50%); }
-      .gh-ran-pkg-rank-3 { border-left-color: var(--pkg-3-edge, #7ee787); background-image: linear-gradient(90deg, var(--pkg-3-tint, rgb(126 231 135 / .06)), transparent 50%); }
+      /* Package preference: only the best item gets the platform hue. */
+      .gh-ran-pkg-rank-1,
+      .gh-ran-best { border-left-color: var(--pkg-1-edge, #116329); background-image: linear-gradient(90deg, var(--pkg-1-tint, rgb(17 99 41 / .18)), transparent 50%); }
       .gh-ran-group-header {
         display: flex;
         align-items: center;
         padding: 8px 14px 4px;
         list-style: none;
         border-bottom: 0;
+        border-left: 4px solid var(--group-edge, transparent);
       }
       .gh-ran-group-header--sep {
         margin-top: 8px;
@@ -508,16 +534,14 @@
       .gh-ran-badge--device-mobile { color: #fff; background: #9a6700; border-color: #825000; }
       .gh-ran-badge--device-desktop { color: #fff; background: #24292f; border-color: #1b1f24; }
       .gh-ran-badge--platform-android { color: #1a7f37; background: #dafbe1; border-color: #4ac26b; }
-      .gh-ran-badge--platform-ios { color: #57606a; background: #f6f8fa; border-color: #afb8c1; }
+      .gh-ran-badge--platform-ios { color: #8250df; background: #fbefff; border-color: #d8b4fe; }
       .gh-ran-badge--platform-windows { color: #0969da; background: #ddf4ff; border-color: #54aeff; }
       .gh-ran-badge--platform-macos { color: #57606a; background: #f6f8fa; border-color: #8c959f; }
       .gh-ran-badge--platform-linux { color: #9a6700; background: #fff8c5; border-color: #d4a72c; }
       .gh-ran-badge--architecture { color: #8250df; background: #fbefff; border-color: #d8b4fe; }
       .gh-ran-badge--architecture.gh-ran-badge--preferred { color: #fff; background: #1a7f37; border-color: #116329; }
-      .gh-ran-badge--package { color: var(--pkg-base-fg, #1a7f37); background: var(--pkg-base-bg, #dafbe1); border-color: var(--pkg-base-border, #7ee787); }
+      .gh-ran-badge--package { color: #57606a; background: #f6f8fa; border-color: #d8dee4; }
       .gh-ran-badge--package.gh-ran-badge--package-tier-1 { color: var(--pkg-1-fg, #fff); background: var(--pkg-1-bg, #116329); border-color: var(--pkg-1-border, #0a3622); }
-      .gh-ran-badge--package.gh-ran-badge--package-tier-2 { color: var(--pkg-2-fg, #fff); background: var(--pkg-2-bg, #2da44e); border-color: var(--pkg-2-border, #1a7f37); }
-      .gh-ran-badge--package.gh-ran-badge--package-tier-3 { color: var(--pkg-3-fg, #2da44e); background: var(--pkg-3-bg, #f0fff4); border-color: var(--pkg-3-border, #a7e3b1); }
       .gh-ran-digest {
         position: relative;
         flex: 0 0 auto !important;
@@ -640,37 +664,31 @@
       }
       .gh-ran-assets-jump:focus-visible { outline: 2px solid #54aeff; outline-offset: 2px; }
       @media (prefers-color-scheme: dark) {
-        .gh-ran-mobile { border-left-color: #d4a72c; }
-        .gh-ran-desktop { border-left-color: #58a6ff; }
         .gh-ran-group-header--sep { border-top-color: var(--borderColor-muted, #30363d); }
         .gh-ran-system-android {
-          --pkg-base-bg: #173c24; --pkg-base-fg: #7ee787; --pkg-base-border: #2ea043;
+          --group-edge: #1a7f37;
           --pkg-1-bg: #2ea043; --pkg-1-fg: #fff; --pkg-1-border: #3fb950; --pkg-1-edge: #3fb950; --pkg-1-tint: rgb(63 185 80 / .26);
-          --pkg-2-bg: #1a7f37; --pkg-2-fg: #fff; --pkg-2-border: #2ea043; --pkg-2-edge: #1a7f37; --pkg-2-tint: rgb(26 127 55 / .16);
-          --pkg-3-bg: #0f2a18; --pkg-3-fg: #7ee787; --pkg-3-border: #1a7f37; --pkg-3-edge: #14532d; --pkg-3-tint: rgb(126 231 135 / .08);
+        }
+        .gh-ran-system-ios {
+          --group-edge: #6639ba;
+          --pkg-1-bg: #a371f7; --pkg-1-fg: #fff; --pkg-1-border: #8957e5; --pkg-1-edge: #a371f7; --pkg-1-tint: rgb(163 113 247 / .26);
         }
         .gh-ran-system-macos {
-          --pkg-base-bg: #21262d; --pkg-base-fg: #c9d1d9; --pkg-base-border: #6e7681;
+          --group-edge: #484f58;
           --pkg-1-bg: #6e7681; --pkg-1-fg: #fff; --pkg-1-border: #8b949e; --pkg-1-edge: #8b949e; --pkg-1-tint: rgb(139 148 158 / .24);
-          --pkg-2-bg: #30363d; --pkg-2-fg: #e6edf3; --pkg-2-border: #484f58; --pkg-2-edge: #6e7681; --pkg-2-tint: rgb(110 118 129 / .16);
-          --pkg-3-bg: #161b22; --pkg-3-fg: #8b949e; --pkg-3-border: #30363d; --pkg-3-edge: #30363d; --pkg-3-tint: rgb(139 148 158 / .08);
         }
         .gh-ran-system-windows {
-          --pkg-base-bg: #0d2847; --pkg-base-fg: #79c0ff; --pkg-base-border: #1f6feb;
+          --group-edge: #0d419d;
           --pkg-1-bg: #1f6feb; --pkg-1-fg: #fff; --pkg-1-border: #388bfd; --pkg-1-edge: #58a6ff; --pkg-1-tint: rgb(56 139 253 / .26);
-          --pkg-2-bg: #0d419d; --pkg-2-fg: #fff; --pkg-2-border: #1f6feb; --pkg-2-edge: #1f6feb; --pkg-2-tint: rgb(31 111 235 / .18);
-          --pkg-3-bg: #0d2847; --pkg-3-fg: #79c0ff; --pkg-3-border: #1f6feb; --pkg-3-edge: #0d419d; --pkg-3-tint: rgb(121 192 255 / .10);
         }
         .gh-ran-system-linux {
-          --pkg-base-bg: #3d2e00; --pkg-base-fg: #e3b341; --pkg-base-border: #9e6a03;
+          --group-edge: #6e4c00;
           --pkg-1-bg: #9e6a03; --pkg-1-fg: #fff; --pkg-1-border: #d4a72c; --pkg-1-edge: #d4a72c; --pkg-1-tint: rgb(212 167 44 / .26);
-          --pkg-2-bg: #6e4c00; --pkg-2-fg: #fff8c5; --pkg-2-border: #9e6a03; --pkg-2-edge: #9e6a03; --pkg-2-tint: rgb(158 106 3 / .18);
-          --pkg-3-bg: #3d2e00; --pkg-3-fg: #e3b341; --pkg-3-border: #9e6a03; --pkg-3-edge: #6e4c00; --pkg-3-tint: rgb(227 179 65 / .10);
         }
         .gh-ran-badge--device-mobile { color: #fff8c5; background: #6e4c00; border-color: #9e6a03; }
         .gh-ran-badge--device-desktop { color: #f0f6fc; background: #30363d; border-color: #484f58; }
         .gh-ran-badge--platform-android { color: #7ee787; background: #173c24; border-color: #2ea043; }
-        .gh-ran-badge--platform-ios { color: #c9d1d9; background: #21262d; border-color: #6e7681; }
+        .gh-ran-badge--platform-ios { color: #d2a8ff; background: #2d1f4e; border-color: #8957e5; }
         .gh-ran-badge--platform-windows { color: #79c0ff; background: #0d2847; border-color: #1f6feb; }
         .gh-ran-badge--platform-macos { color: #c9d1d9; background: #21262d; border-color: #6e7681; }
         .gh-ran-badge--platform-linux { color: #e3b341; background: #3d2e00; border-color: #9e6a03; }
@@ -683,13 +701,10 @@
         .gh-ran-file-time::before { border-color: #a371f7; box-shadow: inset 2px -1px 0 -1px #a371f7; }
         .gh-ran-badge--architecture { color: #d2a8ff; background: #2d1f4e; border-color: #8957e5; }
         .gh-ran-badge--architecture.gh-ran-badge--preferred { color: #fff; background: #238636; border-color: #2ea043; }
-        .gh-ran-pkg-rank-1 { border-left-color: var(--pkg-1-edge, #3fb950); background-image: linear-gradient(90deg, var(--pkg-1-tint, rgb(63 185 80 / .26)), transparent 50%); }
-        .gh-ran-pkg-rank-2 { border-left-color: var(--pkg-2-edge, #1a7f37); background-image: linear-gradient(90deg, var(--pkg-2-tint, rgb(26 127 55 / .16)), transparent 50%); }
-        .gh-ran-pkg-rank-3 { border-left-color: var(--pkg-3-edge, #14532d); background-image: linear-gradient(90deg, var(--pkg-3-tint, rgb(126 231 135 / .08)), transparent 50%); }
-        .gh-ran-badge--package { color: var(--pkg-base-fg, #7ee787); background: var(--pkg-base-bg, #173c24); border-color: var(--pkg-base-border, #2ea043); }
+        .gh-ran-pkg-rank-1,
+        .gh-ran-best { border-left-color: var(--pkg-1-edge, #3fb950); background-image: linear-gradient(90deg, var(--pkg-1-tint, rgb(63 185 80 / .26)), transparent 50%); }
+        .gh-ran-badge--package { color: #8b949e; background: #21262d; border-color: #30363d; }
         .gh-ran-badge--package.gh-ran-badge--package-tier-1 { color: var(--pkg-1-fg, #fff); background: var(--pkg-1-bg, #2ea043); border-color: var(--pkg-1-border, #3fb950); }
-        .gh-ran-badge--package.gh-ran-badge--package-tier-2 { color: var(--pkg-2-fg, #fff); background: var(--pkg-2-bg, #1a7f37); border-color: var(--pkg-2-border, #2ea043); }
-        .gh-ran-badge--package.gh-ran-badge--package-tier-3 { color: var(--pkg-3-fg, #7ee787); background: var(--pkg-3-bg, #0f2a18); border-color: var(--pkg-3-border, #1a7f37); }
       }
     `;
     document.head.append(style);
