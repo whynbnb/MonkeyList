@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.6.4
+// @version      0.6.5
 // @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64), ranking package formats with per-platform color steps (Linux: AppImage > deb > rpm; Windows: portable > zip > setup), and labelling each platform group once while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
@@ -472,20 +472,18 @@
           max-width: none !important;
           margin-left: auto !important;
         }
-        /* Two fixed columns at the start of each row so architecture and
-           package line up vertically before the filename. */
+        /* Badges stay together as one cluster, right-aligned inside a fixed
+           front area so the filename starts at the same x on every row. */
         .gh-ran-asset .gh-ran-badges--trail {
-          display: inline-grid;
-          grid-template-columns: 96px 132px;
-          width: 232px;
+          display: inline-flex;
+          flex-wrap: nowrap;
+          justify-content: flex-end;
+          width: 210px;
           gap: 4px;
           align-items: center;
-          justify-items: start;
           margin: 0 10px 0 0;
           vertical-align: middle;
         }
-        .gh-ran-asset .gh-ran-badge--architecture { grid-column: 1; }
-        .gh-ran-asset .gh-ran-badge--package { grid-column: 2; }
       }
       .gh-ran-badges {
         display: inline-flex;
