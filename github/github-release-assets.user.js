@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.7.1
+// @version      0.7.2
 // @description  Highlight platform, architecture, and package type in GitHub release assets, emphasizing the recommended build (Android arm64-v8a, macOS arm64, Windows/Linux x64), ranking package formats with per-platform colors (Linux: AppImage > deb > rpm; Windows: portable > zip > setup), labelling each platform group once, and offering an eye toggle in the Assets header to temporarily disable the styling while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
@@ -14,7 +14,6 @@
   const STYLE_ID = 'gh-release-asset-navigator-style';
   const PROCESSED = 'data-gh-ran-processed';
   const ASSETS_ID = 'gh-ran-assets';
-  const TOGGLE_ID = 'gh-ran-toggle';
   const TOGGLE_STYLE_ID = 'gh-ran-toggle-style';
   const ENABLED_KEY = 'gh-ran-enabled';
   const checksumOrigins = new WeakMap();
@@ -115,6 +114,12 @@
     return link.closest('li, .Box-row') || link.parentElement;
   }
 
+  function releaseKeyFor(node) {
+    // The releases index page renders one <section id="release-vX"> per release,
+    // each with its own asset list. Keep ranking/grouping scoped to that section.
+    return node?.closest('section[id^="release-"]')?.id || '';
+  }
+
   function getFileSize(row) {
     const text = [...row.querySelectorAll('span')]
       .map((span) => span.textContent.trim())
@@ -193,7 +198,7 @@
       const tier = Number(badge.dataset.ghRanPkgTier) || 0;
       const row = badge.closest('.gh-ran-asset');
       if (!tier || !row) return;
-      const key = `${row.dataset.ghRanSystem || ''}|${row.dataset.ghRanArch || ''}`;
+      const key = `${releaseKeyFor(row)}|${row.dataset.ghRanSystem || ''}|${row.dataset.ghRanArch || ''}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push({ badge, row, tier });
     });
@@ -239,7 +244,7 @@
       const system = row.dataset.ghRanSystem || '';
       const arch = row.dataset.ghRanArch || '';
       if (!system || !arch) return;
-      const key = `${system}|${arch}`;
+      const key = `${releaseKeyFor(row)}|${system}|${arch}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(row);
     });
@@ -259,18 +264,30 @@
   }
 
   function markPlatformGroups() {
-    const desired = new Map();
-    let previous = '';
+    const byRelease = new Map();
     document.querySelectorAll('.gh-ran-asset').forEach((row) => {
-      const system = row.dataset.ghRanSystem || '';
-      if (!system) return;
-      if (system !== previous) {
-        desired.set(row, {
-          system,
-          device: row.classList.contains('gh-ran-mobile') ? 'mobile' : 'desktop',
-        });
-      }
-      previous = system;
+      const key = releaseKeyFor(row);
+      if (!byRelease.has(key)) byRelease.set(key, []);
+      byRelease.get(key).push(row);
+    });
+
+    const desired = new Map();
+    byRelease.forEach((rows) => {
+      let previous = '';
+      let index = 0;
+      rows.forEach((row) => {
+        const system = row.dataset.ghRanSystem || '';
+        if (!system) return;
+        if (system !== previous) {
+          desired.set(row, {
+            system,
+            device: row.classList.contains('gh-ran-mobile') ? 'mobile' : 'desktop',
+            index,
+          });
+          index++;
+        }
+        previous = system;
+      });
     });
 
     // Drop headers that are no longer right before their group's first row.
@@ -287,7 +304,6 @@
     });
 
     // One header per platform group, written only once.
-    let index = 0;
     desired.forEach((info, row) => {
       let header = row.previousElementSibling;
       if (
@@ -307,11 +323,10 @@
         header.append(badges);
         row.parentElement?.insertBefore(header, row);
       }
-      const separated = index > 0;
+      const separated = info.index > 0;
       if (header.classList.contains('gh-ran-group-header--sep') !== separated) {
         header.classList.toggle('gh-ran-group-header--sep', separated);
       }
-      index++;
     });
   }
 
@@ -342,9 +357,12 @@
       const targetName = checksumRow.dataset.ghRanChecksum;
       if (!targetName || checksumRow.dataset.ghRanGrouped === 'true') return;
 
+      const releaseKey = releaseKeyFor(checksumRow);
       const assets = [...findAssetRows()].filter((link) => {
         const row = getAssetRow(link);
-        return row !== checksumRow && !row?.hasAttribute('data-gh-ran-checksum');
+        return row !== checksumRow
+          && !row?.hasAttribute('data-gh-ran-checksum')
+          && releaseKeyFor(row) === releaseKey;
       });
       const assetLink = assets.find((link) => link.textContent.trim() === targetName)
         || assets.find((link) => link.textContent.trim().startsWith(`${targetName}.`));
@@ -419,50 +437,47 @@
     return 'large';
   }
 
-  function findAssetsSummary() {
+  function findAssetsSummaries() {
     return [...document.querySelectorAll('details > summary')]
-      .find((summary) => summary.textContent.replace(/\s+/g, ' ').trim().startsWith('Assets'));
+      .filter((summary) => summary.textContent.replace(/\s+/g, ' ').trim().startsWith('Assets'));
   }
 
   function applyEnabled() {
     const mainStyle = document.getElementById(STYLE_ID);
     if (mainStyle) mainStyle.disabled = !enabled;
     document.documentElement.classList.toggle('gh-ran-off', !enabled);
-    const button = document.getElementById(TOGGLE_ID);
-    if (button) {
+    document.querySelectorAll('.gh-ran-toggle').forEach((button) => {
       button.classList.toggle('is-off', !enabled);
       button.setAttribute('aria-pressed', String(enabled));
       button.title = enabled ? 'Hide asset styling' : 'Show asset styling';
       button.setAttribute('aria-label', button.title);
+    });
+  }
+
+  function onToggleClick(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    enabled = !enabled;
+    try {
+      localStorage.setItem(ENABLED_KEY, String(enabled));
+    } catch (error) {
+      // Ignore storage failures (private mode, etc.).
     }
+    applyEnabled();
+    if (enabled) scheduleProcessing();
+    else restoreChecksums();
   }
 
   function addToggle() {
-    const summary = findAssetsSummary();
-    if (summary) {
-      let button = document.getElementById(TOGGLE_ID);
-      if (!button) {
-        button = document.createElement('button');
-        button.id = TOGGLE_ID;
-        button.type = 'button';
-        button.className = 'gh-ran-toggle';
-        button.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 2c1.981 0 3.671.992 4.933 2.078 1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.45.678-1.367 1.932-2.637 3.023C11.67 13.008 9.981 14 8 14c-1.981 0-3.671-.992-4.933-2.078C1.797 10.831.88 9.577.43 8.899a1.62 1.62 0 0 1 0-1.798c.45-.678 1.367-1.932 2.637-3.023C4.33 2.992 6.019 2 8 2ZM1.679 7.932a.12.12 0 0 0 0 .136c.411.622 1.241 1.75 2.366 2.717C5.176 11.758 6.527 12.5 8 12.5c1.473 0 2.825-.742 3.955-1.715 1.124-.967 1.954-2.096 2.366-2.717a.12.12 0 0 0 0-.136c-.412-.621-1.242-1.75-2.366-2.717C10.824 4.242 9.473 3.5 8 3.5c-1.473 0-2.825.742-3.955 1.715-1.124.967-1.954 2.096-2.366 2.717ZM8 10a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 10Z"/></svg>';
-        button.addEventListener('click', (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          enabled = !enabled;
-          try {
-            localStorage.setItem(ENABLED_KEY, String(enabled));
-          } catch (error) {
-            // Ignore storage failures (private mode, etc.).
-          }
-          applyEnabled();
-          if (enabled) scheduleProcessing();
-          else restoreChecksums();
-        });
-        summary.append(button);
-      }
-    }
+    findAssetsSummaries().forEach((summary) => {
+      if (summary.querySelector('.gh-ran-toggle')) return;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'gh-ran-toggle';
+      button.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 2c1.981 0 3.671.992 4.933 2.078 1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.45.678-1.367 1.932-2.637 3.023C11.67 13.008 9.981 14 8 14c-1.981 0-3.671-.992-4.933-2.078C1.797 10.831.88 9.577.43 8.899a1.62 1.62 0 0 1 0-1.798c.45-.678 1.367-1.932 2.637-3.023C4.33 2.992 6.019 2 8 2ZM1.679 7.932a.12.12 0 0 0 0 .136c.411.622 1.241 1.75 2.366 2.717C5.176 11.758 6.527 12.5 8 12.5c1.473 0 2.825-.742 3.955-1.715 1.124-.967 1.954-2.096 2.366-2.717a.12.12 0 0 0 0-.136c-.412-.621-1.242-1.75-2.366-2.717C10.824 4.242 9.473 3.5 8 3.5c-1.473 0-2.825.742-3.955 1.715-1.124.967-1.954 2.096-2.366 2.717ZM8 10a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 10Z"/></svg>';
+      button.addEventListener('click', onToggleClick);
+      summary.append(button);
+    });
     applyEnabled();
   }
 
@@ -519,7 +534,7 @@
   function addAssetsJump() {
     if (!/^\/[^/]+\/[^/]+\/releases\/tag\//.test(location.pathname)) return;
 
-    const assetsSummary = findAssetsSummary();
+    const assetsSummary = findAssetsSummaries()[0];
     const assetsSection = assetsSummary?.closest('details-toggle, .tmp-mb-3');
     const breadcrumb = document.querySelector('nav[aria-label="Breadcrumb"]');
     if (!assetsSection || !breadcrumb || document.getElementById('gh-ran-assets-jump')) return;
