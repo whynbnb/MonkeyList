@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.73.1
-// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories can each carry a group note (plus an optional per-user note) that is marked with a small dot on the label and revealed in a styled tooltip on hover, override all other row/post effects, and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default) and can highlight the matched keyword inside the topic title. An advanced master switch can temporarily suspend every page effect without touching saved data.
+// @version      0.73.7
+// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, moving the original poster's avatar to the start of the topic title, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories can each carry a group note (plus an optional per-user note) that is marked with a small dot on the label and revealed in a styled tooltip on hover, override all other row/post effects, and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default) and can highlight the matched keyword inside the topic title. An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
 // @run-at       document-idle
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.73.1';
+  const SCRIPT_VERSION = '0.73.7';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -30,6 +30,7 @@
   const DEBUG_KEY = 'ld-tle-debug';
   const SUSPEND_KEY = 'ld-tle-suspended';
   const SUSPEND_CLASS = 'ld-tle-suspended';
+  const OP_AVATAR_MOVE_KEY = 'ld-tle-op-avatar-move';
   const MARK_STYLE_ID = 'ld-tle-mark-dyn';
   const MARK_CLASS = 'ld-tle-mark';
   const EFFECT_CLASS = 'ld-tle-effect';
@@ -541,12 +542,12 @@
         el.style.removeProperty('--ld-tle-tag-color');
       });
       const posters = row.querySelector('td.posters');
-      const opLink = posters && (
+      const opLink = row.querySelector('a.ld-tle-op-avatar') || (posters && (
         [...posters.querySelectorAll('a[data-user-card]')].find((a) => {
           const img = a.querySelector('img.avatar');
           return img && /原始发帖人/.test(img.getAttribute('title') || '');
         }) || posters.querySelector('a[data-user-card]')
-      );
+      ));
       const user = opLink && opLink.getAttribute('data-user-card');
       const mark = getMark(user);
       const keywordMatch = keywordCategory(row);
@@ -988,7 +989,7 @@
   }
 
   function resetAllData() {
-    [MARK_KEY, CATS_KEY, KEYWORDS_KEY, EFFECTS_KEY, DEBUG_KEY].forEach((key) => localStorage.removeItem(key));
+    [MARK_KEY, CATS_KEY, KEYWORDS_KEY, EFFECTS_KEY, DEBUG_KEY, OP_AVATAR_MOVE_KEY].forEach((key) => localStorage.removeItem(key));
     cats = [];
     effects = loadEffects();
     keywordRules = [];
@@ -1061,6 +1062,8 @@
     panelEl.classList.add('is-open');
     const suspendToggle = panelEl.querySelector('.ld-tle-panel__suspend');
     if (suspendToggle) suspendToggle.checked = isSuspended();
+    const opAvatarToggle = panelEl.querySelector('.ld-tle-panel__op-avatar');
+    if (opAvatarToggle) opAvatarToggle.checked = isOpAvatarMoveEnabled();
     fillCatSelects();
     renderEffects();
     renderBuiltinRules();
@@ -1160,7 +1163,11 @@
         <label class="ld-tle-panel__debug-toggle"><input type="checkbox" class="ld-tle-panel__debug"> 启用调试模式</label>
       </section>
       <section class="ld-tle-panel__pane" data-pane="advanced">
-        <div class="ld-tle-panel__section-head"><div><strong>高级</strong><span>全局开关，暂停脚本的全部页面效果，标记与设置数据不受影响</span></div></div>
+        <div class="ld-tle-panel__section-head"><div><strong>高级</strong><span>全局行为与暂停开关，设置和标记数据不受影响</span></div></div>
+        <div class="ld-tle-panel__card">
+          <label class="ld-tle-panel__debug-toggle"><input type="checkbox" class="ld-tle-panel__op-avatar"> 楼主头像移到标题前并放大</label>
+          <div class="ld-tle-panel__suspend-hint">默认开启。关闭后楼主头像保留在右侧头像组，不移动、不放大；其他高亮效果不变。</div>
+        </div>
         <div class="ld-tle-panel__card">
           <label class="ld-tle-panel__debug-toggle"><input type="checkbox" class="ld-tle-panel__suspend"> 临时关闭所有效果</label>
           <div class="ld-tle-panel__suspend-hint">开启后：等级标签、时间标签、推广/抽奖淡化、陈旧淡化、待回复标记、楼主高亮、回复跳转、用户标记徽章与行效果、关键词效果全部停止。悬浮按钮和本面板保持可用，关闭开关即可原样恢复。</div>
@@ -1194,7 +1201,10 @@
       resetAllData();
       const ta = panelEl.querySelector('.ld-tle-panel__json');
       if (ta) ta.value = '';
+      const opToggle = panelEl.querySelector('.ld-tle-panel__op-avatar');
+      if (opToggle) opToggle.checked = isOpAvatarMoveEnabled();
       showPanelMsg('已彻底清理，恢复默认配置');
+      processWithRetries();
     });
     const debugToggle = panelEl.querySelector('.ld-tle-panel__debug');
     debugToggle.checked = isDebugMode();
@@ -1202,6 +1212,17 @@
       setDebugMode(debugToggle.checked);
       processWithRetries();
     });
+    const opAvatarToggle = panelEl.querySelector('.ld-tle-panel__op-avatar');
+    if (opAvatarToggle) {
+      opAvatarToggle.checked = isOpAvatarMoveEnabled();
+      opAvatarToggle.addEventListener('change', () => {
+        setOpAvatarMoveEnabled(opAvatarToggle.checked);
+        showPanelMsg(opAvatarToggle.checked
+          ? '已开启：楼主头像移到标题前并放大'
+          : '已关闭：楼主头像保留在右侧头像组');
+        processWithRetries();
+      });
+    }
     const suspendToggle = panelEl.querySelector('.ld-tle-panel__suspend');
     if (suspendToggle) {
       suspendToggle.checked = isSuspended();
@@ -1801,12 +1822,7 @@
 
   function markLonelyTopics() {
     document.querySelectorAll('tr.topic-list-item').forEach((row) => {
-      const postersTd = row.querySelector('td.posters');
-      if (!postersTd) {
-        row.classList.remove(LONELY_CLASS);
-        return;
-      }
-      const usernames = [...postersTd.querySelectorAll('a[data-user-card]')]
+      const usernames = [...row.querySelectorAll('td.posters a[data-user-card], a.ld-tle-op-avatar')]
         .map((a) => a.getAttribute('data-user-card'));
       const unique = [...new Set(usernames)].filter(Boolean);
       if (unique.length === 0) {
@@ -1901,6 +1917,17 @@
     try { return localStorage.getItem(SUSPEND_KEY) === '1'; } catch (e) { return false; }
   }
 
+  function isOpAvatarMoveEnabled() {
+    try { return localStorage.getItem(OP_AVATAR_MOVE_KEY) !== '0'; } catch (e) { return true; }
+  }
+
+  function setOpAvatarMoveEnabled(on) {
+    try {
+      if (on) localStorage.removeItem(OP_AVATAR_MOVE_KEY);
+      else localStorage.setItem(OP_AVATAR_MOVE_KEY, '0');
+    } catch (e) { /* ignore */ }
+  }
+
   function setSuspended(on) {
     try {
       if (on) localStorage.setItem(SUSPEND_KEY, '1');
@@ -1914,6 +1941,29 @@
     } else {
       suspendCleared = false;
     }
+  }
+
+  function clearOpAvatarRow(td) {
+    if (!td) return;
+    td.classList.remove('ld-tle-has-op-avatar');
+    td.style.removeProperty('--ld-tle-op-badge-left');
+    td.style.removeProperty('--ld-tle-op-badge-top');
+  }
+
+  function restoreMovedOpAvatars(force) {
+    document.querySelectorAll('a.ld-tle-op-avatar').forEach((link) => {
+      const row = link.closest('tr.topic-list-item');
+      const posters = row?.querySelector('td.posters');
+      if (!posters) {
+        if (force) link.classList.remove('ld-tle-op-avatar');
+        return;
+      }
+      link.classList.remove('ld-tle-op-avatar');
+      posters.insertBefore(link, posters.firstChild);
+    });
+    document.querySelectorAll('td.ld-tle-has-op-avatar').forEach((td) => {
+      if (!td.querySelector('a.ld-tle-op-avatar')) clearOpAvatarRow(td);
+    });
   }
 
   // Remove every class/inline-style based effect. Injected nodes (chips, time
@@ -1936,6 +1986,7 @@
     document.querySelectorAll('td.' + ROW_CLASS).forEach((td) => {
       [...td.classList].filter((name) => name === ROW_CLASS || name.startsWith(ROW_CLASS + '--')).forEach((name) => td.classList.remove(name));
     });
+    restoreMovedOpAvatars(false);
     document.querySelectorAll('img.ld-tle-op, img.ld-tle-other').forEach((img) => {
       [...img.classList].filter((name) => name === 'ld-tle-op' || name === 'ld-tle-other' || /^ld-tle-op--\d$/.test(name)).forEach((name) => img.classList.remove(name));
     });
@@ -2001,20 +2052,82 @@
   }
 
   function enhancePosters() {
+    const moveEnabled = isOpAvatarMoveEnabled();
+    if (!moveEnabled) restoreMovedOpAvatars(true);
     document.querySelectorAll('tr.topic-list-item').forEach((row) => {
       const postersTd = row.querySelector('td.posters');
-      if (!postersTd) return;
-      const imgs = [...postersTd.querySelectorAll('a > img.avatar')];
+      const mainTd = row.querySelector('td.main-link');
+      const titleLine = mainTd?.querySelector('.link-top-line') || mainTd;
+      let existing = mainTd?.querySelector('a.ld-tle-op-avatar') || null;
+
+      const markedOp = postersTd && [...postersTd.querySelectorAll('a[data-user-card]')].find((a) => {
+        const img = a.querySelector('img.avatar');
+        return img && /原始发帖人/.test(img.getAttribute('title') || '');
+      });
+
+      // A reused list row can still carry the previous topic's moved avatar.
+      // Trust the poster list when it explicitly marks a different original poster.
+      if (existing && markedOp && usernameFromEl(existing) !== usernameFromEl(markedOp)) {
+        existing.remove();
+        existing = null;
+      }
+
+      let opLink = existing;
+      if (!opLink && postersTd) {
+        opLink = markedOp
+          || [...postersTd.querySelectorAll('a[data-user-card]')].find((a) => a.querySelector('img.avatar'))
+          || null;
+      }
+      if (!opLink) {
+        clearOpAvatarRow(mainTd);
+        return;
+      }
+
+      const opImg = opLink.querySelector('img.avatar');
+      if (!opImg) {
+        clearOpAvatarRow(mainTd);
+        return;
+      }
+
+      const imgs = [
+        ...(postersTd ? postersTd.querySelectorAll('a > img.avatar') : []),
+        ...(existing ? existing.querySelectorAll('img.avatar') : []),
+      ];
       imgs.forEach((img) => {
         img.classList.remove('ld-tle-op', 'ld-tle-other', 'ld-tle-op--0', 'ld-tle-op--1', 'ld-tle-op--2', 'ld-tle-op--3', 'ld-tle-op--4');
       });
-      if (!imgs.length) return;
-      const opImg = imgs.find((img) => /原始发帖人/.test(img.getAttribute('title') || '')) || imgs[0];
       opImg.classList.add('ld-tle-op');
       imgs.forEach((img) => { if (img !== opImg) img.classList.add('ld-tle-other'); });
-      const mainTd = row.querySelector('td.main-link');
       const levelClass = mainTd && [...mainTd.classList].find((c) => /^ld-tle-row--\d$/.test(c));
       if (levelClass) opImg.classList.add(levelClass.replace('ld-tle-row', 'ld-tle-op'));
+
+      // Keep the original poster's avatar at the start of the title line,
+      // instead of inside the participants column at the far right. The CSS
+      // floats it so it can span the title and the category/tag line, and the
+      // status icons (pinned / solved) sit to its right.
+      if (moveEnabled && titleLine) {
+        opLink.classList.add('ld-tle-op-avatar');
+        if (titleLine.firstElementChild !== opLink) {
+          titleLine.insertBefore(opLink, titleLine.firstChild);
+        }
+        if (mainTd) {
+          mainTd.classList.add('ld-tle-has-op-avatar');
+          const badges = titleLine.querySelector(':scope > .topic-post-badges');
+          if (badges && badges.textContent.trim()) {
+            const base = mainTd.getBoundingClientRect();
+            const avatar = opLink.getBoundingClientRect();
+            const bw = badges.offsetWidth || 18;
+            const bh = badges.offsetHeight || 18;
+            const borderLeft = mainTd.clientLeft || 0;
+            const borderTop = mainTd.clientTop || 0;
+            mainTd.style.setProperty('--ld-tle-op-badge-left', `${avatar.right - base.left - borderLeft - bw + 7}px`);
+            mainTd.style.setProperty('--ld-tle-op-badge-top', `${avatar.bottom - base.top - borderTop - bh + 7}px`);
+          } else {
+            mainTd.style.removeProperty('--ld-tle-op-badge-left');
+            mainTd.style.removeProperty('--ld-tle-op-badge-top');
+          }
+        }
+      }
     });
   }
 
@@ -2206,14 +2319,47 @@
         opacity: .92;
         filter: none;
       }
+      td.ld-tle-has-op-avatar { --ld-tle-op-size: 40px; position: relative; }
+      td.ld-tle-has-op-avatar .link-top-line > .topic-statuses {
+        float: left;
+        display: flex;
+        align-items: flex-start;
+        height: var(--ld-tle-op-size, 40px);
+        margin: 2px 6px 0 0;
+        padding-top: 2px;
+        box-sizing: border-box;
+      }
+      td.ld-tle-has-op-avatar .link-top-line > .topic-post-badges {
+        position: absolute;
+        left: var(--ld-tle-op-badge-left, 30px);
+        top: var(--ld-tle-op-badge-top, 30px);
+        margin: 0;
+        z-index: 2;
+        white-space: nowrap;
+      }
+      a.ld-tle-op-avatar {
+        float: left;
+        display: block;
+        width: var(--ld-tle-op-size, 40px);
+        height: var(--ld-tle-op-size, 40px);
+        margin: 2px 6px 0 0;
+        line-height: 0;
+      }
+      a.ld-tle-op-avatar img.avatar {
+        width: var(--ld-tle-op-size, 40px) !important;
+        height: var(--ld-tle-op-size, 40px) !important;
+        margin: 0 !important;
+        border-radius: 50% !important;
+        display: block;
+      }
       img.ld-tle-op {
-        box-shadow: 0 0 0 2px #8a9199 !important;
+        box-shadow: 0 0 0 1px rgba(138, 145, 153, .65) !important;
         transition: box-shadow .15s ease;
       }
-      img.ld-tle-op.ld-tle-op--1 { box-shadow: 0 0 0 2px #0969da !important; }
-      img.ld-tle-op.ld-tle-op--2 { box-shadow: 0 0 0 2px #1a7f37 !important; }
-      img.ld-tle-op.ld-tle-op--3 { box-shadow: 0 0 0 2px #d4a72c !important; }
-      img.ld-tle-op.ld-tle-op--4 { box-shadow: 0 0 0 2px #8250df !important; }
+      img.ld-tle-op.ld-tle-op--1 { box-shadow: 0 0 0 1px rgba(9, 105, 218, .65) !important; }
+      img.ld-tle-op.ld-tle-op--2 { box-shadow: 0 0 0 1px rgba(26, 127, 55, .65) !important; }
+      img.ld-tle-op.ld-tle-op--3 { box-shadow: 0 0 0 1px rgba(212, 167, 44, .65) !important; }
+      img.ld-tle-op.ld-tle-op--4 { box-shadow: 0 0 0 1px rgba(130, 80, 223, .65) !important; }
       img.ld-tle-other {
         opacity: .4 !important;
         filter: grayscale(.6) !important;
@@ -2531,6 +2677,7 @@
       .ld-tle-panel__pane.is-active { display: block; }
       .ld-tle-panel__tools, .ld-tle-panel__btns, .ld-tle-panel__add, .ld-tle-panel__cat-add, .ld-tle-panel__keyword-add { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
       .ld-tle-panel__card { padding: 12px; border: 1px solid #e1e6eb; border-radius: var(--ld-tle-radius); background: #f8fafc; box-shadow: 0 1px 2px rgba(31,35,40,.04); }
+      .ld-tle-panel__pane[data-pane="advanced"] .ld-tle-panel__card + .ld-tle-panel__card { margin-top: 10px; }
       .ld-tle-panel__section-head { display: flex; align-items: center; justify-content: space-between; margin: 6px 0 8px; }
       .ld-tle-panel__section-head strong { display: block; font-size: 13px; }
       .ld-tle-panel__section-head span { display: block; margin-top: 2px; color: #8b949e; font-size: 11px; }
@@ -2652,11 +2799,11 @@
         .${TIME_CLASS}--fresh { color: #f0f6fc; background: #2ea043; border-color: #2ea043; }
         .${TIME_CLASS}--week { color: #79c0ff; background: #0d2847; border-color: #1f6feb; }
         article.${OP_POST_CLASS} .post__body > .topic-meta-data .names .first::after { background: #8957e5; }
-        img.ld-tle-op { box-shadow: 0 0 0 2px #6e7681 !important; }
-        img.ld-tle-op.ld-tle-op--1 { box-shadow: 0 0 0 2px #1f6feb !important; }
-        img.ld-tle-op.ld-tle-op--2 { box-shadow: 0 0 0 2px #2ea043 !important; }
-        img.ld-tle-op.ld-tle-op--3 { box-shadow: 0 0 0 2px #e3b341 !important; }
-        img.ld-tle-op.ld-tle-op--4 { box-shadow: 0 0 0 2px #8957e5 !important; }
+        img.ld-tle-op { box-shadow: 0 0 0 1px rgba(110, 118, 129, .65) !important; }
+        img.ld-tle-op.ld-tle-op--1 { box-shadow: 0 0 0 1px rgba(31, 111, 235, .65) !important; }
+        img.ld-tle-op.ld-tle-op--2 { box-shadow: 0 0 0 1px rgba(46, 160, 67, .65) !important; }
+        img.ld-tle-op.ld-tle-op--3 { box-shadow: 0 0 0 1px rgba(227, 179, 65, .65) !important; }
+        img.ld-tle-op.ld-tle-op--4 { box-shadow: 0 0 0 1px rgba(137, 87, 229, .65) !important; }
         .${MARK_ADD} { border-color: #30363d; color: #8b949e; }
         .${MARK_ADD}:hover { background: #21262d; }
         [data-ld-tle-note="1"]::after { background: #0d1117; box-shadow: 0 0 0 1px rgba(240, 246, 252, .55); }
