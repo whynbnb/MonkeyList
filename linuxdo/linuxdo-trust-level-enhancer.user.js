@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.73.7
+// @version      0.73.9
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, moving the original poster's avatar to the start of the topic title, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories can each carry a group note (plus an optional per-user note) that is marked with a small dot on the label and revealed in a styled tooltip on hover, override all other row/post effects, and can be imported, exported, merged, and deduplicated from a manage panel. Keyword rules can each toggle whether letter case is ignored (on by default) and can highlight the matched keyword inside the topic title. An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.73.7';
+  const SCRIPT_VERSION = '0.73.9';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -762,8 +762,15 @@
       if (group) {
         const reason = String(binding.reason || '').trim();
         const groupNote = String(group.note || '').trim();
-        // Group-level note first, then the per-user reason (if both exist).
-        const noteText = [groupNote, reason].filter(Boolean).join('\n');
+        const userNote = String((mark && mark.note) || '').trim();
+        // The hint should contain every note that applies to this badge: the
+        // group note, the user's overall note, and this user's reason for the
+        // group. All of them are shown together in the custom tooltip.
+        const parts = [];
+        if (groupNote) parts.push(`分组备注：${groupNote}`);
+        if (userNote) parts.push(`用户备注：${userNote}`);
+        if (reason) parts.push(`绑定原因：${reason}`);
+        const noteText = parts.join('\n');
         // With a note we render our own tooltip, so suppress the native title to
         // avoid two overlapping tooltips; without one keep the label as the title.
         wanted.push({ kind: 'group-tag', id: group.id, label: group.label, title: noteText ? '' : group.label, note: noteText, color: group.color || '#0969da', hasNote: !!noteText });
@@ -1037,8 +1044,11 @@
     if (!fab) return;
     const suspended = isSuspended();
     fab.classList.toggle('ld-tle-fab--suspended', suspended);
-    fab.textContent = suspended ? '已暂停' : '标记';
-    fab.title = suspended ? '效果已临时关闭 · 点击打开面板' : '用户标记';
+    fab.textContent = '标记';
+    fab.title = suspended
+      ? '效果已临时关闭 · 右键恢复，左键打开面板'
+      : '用户标记 · 右键临时关闭所有效果';
+    fab.setAttribute('aria-label', fab.title);
   }
 
   function ensureFab() {
@@ -1049,6 +1059,14 @@
       fab.className = 'ld-tle-fab';
       fab.addEventListener('click', togglePanel);
       document.body.append(fab);
+    }
+    if (!fab.dataset.ldTleRightClick) {
+      fab.dataset.ldTleRightClick = '1';
+      fab.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        setSuspended(!isSuspended());
+        processWithRetries();
+      });
     }
     updateFabState();
   }
@@ -1170,7 +1188,7 @@
         </div>
         <div class="ld-tle-panel__card">
           <label class="ld-tle-panel__debug-toggle"><input type="checkbox" class="ld-tle-panel__suspend"> 临时关闭所有效果</label>
-          <div class="ld-tle-panel__suspend-hint">开启后：等级标签、时间标签、推广/抽奖淡化、陈旧淡化、待回复标记、楼主高亮、回复跳转、用户标记徽章与行效果、关键词效果全部停止。悬浮按钮和本面板保持可用，关闭开关即可原样恢复。</div>
+          <div class="ld-tle-panel__suspend-hint">开启后：等级标签、时间标签、推广/抽奖淡化、陈旧淡化、待回复标记、楼主高亮、回复跳转、用户标记徽章与行效果、关键词效果全部停止。悬浮按钮和本面板保持可用，关闭开关即可原样恢复。也可右键悬浮按钮快速切换。</div>
         </div>
       </section>
       <div class="ld-tle-panel__msg" aria-live="polite"></div>
@@ -1679,8 +1697,15 @@
          tagButton.className = 'ld-tle-panel__row-tag is-on ld-tle-panel__row-group-tag';
          tagButton.textContent = group.label;
          const reason = String(binding.reason || '').trim();
-         const noteText = [String(group.note || '').trim(), reason].filter(Boolean).join('\n');
+         const groupNote = String(group.note || '').trim();
+         const userNote = String(noteValue || '').trim();
+         const parts = [];
+         if (groupNote) parts.push(`分组备注：${groupNote}`);
+         if (userNote) parts.push(`用户备注：${userNote}`);
+         if (reason) parts.push(`绑定原因：${reason}`);
+         const noteText = parts.join('\n');
          tagButton.title = noteText || '点击编辑绑定原因';
+         tagButton.setAttribute('aria-label', noteText ? `${group.label}：${noteText}` : group.label);
          if (noteText) tagButton.dataset.ldTleNote = '1';
          tagButton.addEventListener('click', () => {
            const value = window.prompt(`编辑「${group.label}」的绑定原因`, binding.reason || '');
@@ -1935,6 +1960,8 @@
     } catch (e) { /* ignore */ }
     document.documentElement.classList.toggle(SUSPEND_CLASS, !!on);
     updateFabState();
+    const suspendToggle = panelEl?.querySelector('.ld-tle-panel__suspend');
+    if (suspendToggle) suspendToggle.checked = !!on;
     if (on) {
       clearEffectState();
       suspendCleared = true;
@@ -2852,7 +2879,15 @@
 
       /* Advanced: master switch that temporarily suspends every page effect */
       .ld-tle-panel__suspend-hint { margin-top: 7px; color: #8b949e; font-size: 11px; line-height: 1.6; }
-      .ld-tle-fab--suspended { background: #cf222e; color: #fff; }
+      .ld-tle-fab--suspended {
+        background: #eaeef2;
+        color: #8b949e;
+        text-decoration: line-through;
+        box-shadow: 0 4px 14px rgba(31, 35, 40, .08);
+      }
+      @media (prefers-color-scheme: dark) {
+        .ld-tle-fab--suspended { background: #21262d; color: #6e7681; }
+      }
       html.${SUSPEND_CLASS} .${CHIP_CLASS},
       html.${SUSPEND_CLASS} .${TIME_CLASS},
       html.${SUSPEND_CLASS} .${MARK_BADGE},
