@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         New API 常规 TPS（不含首字）
 // @namespace    local.newapi.conv-tps
-// @version      1.2.0
+// @version      1.2.1
 // @description  在 New API 用量日志的 t/s 旁追加“输出 tokens ÷ (耗时 − 首字)”的常规解码吞吐，并用独立胶囊样式区分。
 // @match        *://*/*
 // @run-at       document-idle
@@ -114,18 +114,12 @@
   }
 
   function formatTps(tps) {
-    if (tps >= 1000) return `${(tps / 1000).toFixed(1)}K t/s`;
     if (tps < 10) return `${tps.toFixed(1)} t/s`;
     return `${Math.round(tps)} t/s`;
   }
 
   function formatTpsRange(lower, upper) {
     if (!Number.isFinite(upper)) return `≥${formatTps(lower)}`;
-
-    if (upper >= 1000) {
-      const low = lower >= 1000 ? (lower / 1000).toFixed(1) : (lower / 1000).toFixed(2);
-      return `${low}–${(upper / 1000).toFixed(1)}K t/s`;
-    }
 
     const format = (value) => (value < 10 ? value.toFixed(1) : `${Math.round(value)}`);
     const low = format(lower);
