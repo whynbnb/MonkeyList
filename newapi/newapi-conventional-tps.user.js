@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         New API 常规 TPS（不含首字）
 // @namespace    local.newapi.conv-tps
-// @version      1.1.0
+// @version      1.2.0
 // @description  在 New API 用量日志的 t/s 旁追加“输出 tokens ÷ (耗时 − 首字)”的常规解码吞吐，并用独立胶囊样式区分。
 // @match        *://*/*
 // @run-at       document-idle
@@ -19,13 +19,17 @@
  *
  * 本脚本不改站点代码，只在原 t/s 下方追加一个带 ≈ 的胶囊。
  *
- * 已知误差
+ * TPS 区间
  * --------
- * use_time 在后端是 time.Now().Unix() - start.Unix()，只有整秒精度；
- * ttft 来自毫秒值，显示到 0.1s。因此结果有约 ±5% 的量化误差，
- * 且“首字 >= 耗时”时无法估算（脚本会显示 ≈—）。
- * 另外 TPS >= 400 通常意味着解码窗口只有零点几秒，误差被放大，
- * 脚本会把这类结果弱化显示（CONFIG.lowConfidenceTps）。
+ * use_time 只有整秒精度，真实总时长 d 满足 T-1 < d < T+1；
+ * 首字 <60s 显示到 0.1s，>=60s 显示为 Xm Ys；记显示的舍入半宽为 h：
+ *
+ *     TPS >  N / (T + 1 - f + h)
+ *     TPS <  N / (T - 1 - f - h)   （分母为正时）
+ *
+ * 胶囊显示这个区间；点估计只放在悬停提示里。
+ * 当首字 >= 耗时、点估计不存在时，显示可确定的下界（≥x t/s）。
+ * TPS >= 400 时通常解码窗口很短、区间很宽，脚本会弱化显示。
  *
  * 收窄作用范围
  * ------------
@@ -46,9 +50,9 @@
     dimOriginal: true,
     // 是否直接隐藏原始 t/s（优先级高于 dimOriginal）
     hideOriginal: false,
-    // 首字 >= 耗时（整秒截断导致）时是否显示 “≈—”
+    // 首字 >= 耗时（点估计不存在）时是否显示下界 “≥x t/s”
     showUnavailable: true,
-    // 达到该 TPS 时弱化显示：解码窗口通常很短，整秒截断误差被放大
+    // 点估计达到该 TPS、或区间只有下界时弱化显示：可信度偏低
     lowConfidenceTps: 400,
   };
 
@@ -115,6 +119,20 @@
     return `${Math.round(tps)} t/s`;
   }
 
+  function formatTpsRange(lower, upper) {
+    if (!Number.isFinite(upper)) return `≥${formatTps(lower)}`;
+
+    if (upper >= 1000) {
+      const low = lower >= 1000 ? (lower / 1000).toFixed(1) : (lower / 1000).toFixed(2);
+      return `${low}–${(upper / 1000).toFixed(1)}K t/s`;
+    }
+
+    const format = (value) => (value < 10 ? value.toFixed(1) : `${Math.round(value)}`);
+    const low = format(lower);
+    const high = format(upper);
+    return low === high ? `${low} t/s` : `${low}–${high} t/s`;
+  }
+
   /* ==================== 渲染 ==================== */
 
   function updateRow(row) {
@@ -146,7 +164,8 @@
       return;
     }
 
-    const ttft = parseSeconds(timeValues[0].textContent);
+    const ttftText = timeValues[0].textContent || '';
+    const ttft = parseSeconds(ttftText);
     const total = parseSeconds(timeValues[1].textContent);
     const tokens = parseCompletionTokens(tokenCell);
 
@@ -155,43 +174,61 @@
       return;
     }
 
-    const decode = total - ttft;
+    // 首字 <60s 显示到 0.1s；>=60s 显示为 "Xm Ys"，秒数按整数舍入。
+    const ttftHalfWidth = /\d\s*m\b/i.test(ttftText) ? 0.5 : 0.05;
+
+    const pointDecode = total - ttft;
+    const pointTps = pointDecode > 0.05 ? tokens / pointDecode : NaN;
+
+    // 真实总时长 d 在 (total-1, total+1) 内，显示的首字在 ttft ± halfWidth 内。
+    const maxDecode = total + 1 - (ttft - ttftHalfWidth);
+    const minDecode = total - 1 - (ttft + ttftHalfWidth);
+    const lower = tokens / maxDecode;
+    const upper = minDecode > 0 ? tokens / minDecode : Infinity;
+
     const key = `${tokens}|${ttft}|${total}`;
     let text;
     let title;
     let state;
 
-    if (decode > 0.05) {
-      const tps = tokens / decode;
-      const lowConfidence = tps >= CONFIG.lowConfidenceTps;
-      text = `≈${formatTps(tps)}`;
+    if (!Number.isFinite(pointTps)) {
+      if (!CONFIG.showUnavailable) {
+        clear();
+        return;
+      }
+
+      // 点估计不存在，但解码时间 < maxDecode，仍可给出下界。
+      text = `≥${formatTps(lower)}`;
+      state = 'low';
+      title = [
+        '常规 TPS（解码阶段，不含首字）',
+        `首字 ${formatSeconds(ttft)} ≥ 耗时 ${formatSeconds(total)}`,
+        `解码时间 < ${formatSeconds(maxDecode)}，因此 TPS > ${formatTps(lower)}`,
+        '耗时按整秒截断；首字接近结束时只能确定下限。',
+      ].join('\n');
+    } else {
+      const lowConfidence = pointTps >= CONFIG.lowConfidenceTps || !Number.isFinite(upper);
+      text = Number.isFinite(upper)
+        ? `≈${formatTpsRange(lower, upper)}`
+        : `≥${formatTps(lower)}`;
       state = lowConfidence ? 'low' : 'ok';
 
       const lines = [
         '常规 TPS（解码阶段，不含首字）',
-        `= ${formatInt(tokens)} tokens ÷ (${formatSeconds(total)} − ${formatSeconds(ttft)})`,
-        `= ${formatInt(tokens)} ÷ ${formatSeconds(decode)}`,
-        `≈ ${formatTps(tps)}`,
+        `点估计 ≈${formatTps(pointTps)}`,
+        `= ${formatInt(tokens)} tokens ÷ ${formatSeconds(pointDecode)}`,
+        Number.isFinite(upper)
+          ? `区间 ${formatTpsRange(lower, upper)}`
+          : `下界 ${formatTps(lower)}`,
         '',
-        '注：耗时来自整秒截断，结果存在量化误差。',
+        '区间来源：耗时只有整秒精度（±1s），首字按显示精度舍入。',
       ];
       if (lowConfidence) {
         lines.push(
-          `⚠ 可信度偏低：解码窗口只有 ${formatSeconds(decode)}，整秒误差被显著放大，仅供参考。`
+          `⚠ 可信度偏低：高 TPS 行通常解码窗口较短，整秒误差占比更大；请以区间为准。`
         );
       }
       title = lines.join('\n');
-    } else if (CONFIG.showUnavailable) {
-      text = '≈—';
-      state = 'na';
-      title = [
-        '无法估算常规 TPS',
-        `首字 ${formatSeconds(ttft)} ≥ 耗时 ${formatSeconds(total)}`,
-        '耗时按整秒截断；短请求或首字接近结束时无法区分解码时间。',
-      ].join('\n');
-    } else {
-      clear();
-      return;
     }
 
     if (marker) {
@@ -261,10 +298,6 @@
         white-space: nowrap;
         cursor: help;
         user-select: none;
-      }
-      .${MARKER_CLASS}[data-state="na"] {
-        border-style: dotted;
-        opacity: 0.65;
       }
       .${MARKER_CLASS}[data-state="low"] {
         border-style: dotted;
